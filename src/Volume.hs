@@ -8,7 +8,7 @@ module Volume
   )
 where
 
-import TheDisk (M (ReadSector))
+import TheDisk (M, readSector)
 import Control.Exception (assert)
 import Prelude hiding (interact)
 import Types (HL(..),SectorIndex,SectorOffset,W8,W16,mk16,sectorSize,readInSector)
@@ -64,6 +64,6 @@ get16 si so = do
 
 get8 :: SectorIndex -> SectorOffset -> M W8
 get8 si so = do
-  sec <- ReadSector si
+  sec <- readSector si
   let byte = readInSector sec so
   pure byte

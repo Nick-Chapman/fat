@@ -17,7 +17,7 @@ import Data.ByteString.Internal (c2w)
 import Data.Char (toUpper)
 import Data.List.Split (splitOn)
 import Prelude hiding (interact)
-import TheDisk (M (ReadSector,WriteSector))
+import TheDisk (M,readSector,writeSector)
 import Types (HL(..),W8,W16,W32,SectorIndex,SectorOffset,split16,mk32,writeInSector,toChar,sectorSize,split32)
 import Volume (bytesPerDirEntry,Vol(..),get8,get16)
 
@@ -545,6 +545,6 @@ set16 si so w = do
 
 set8 :: SectorIndex -> SectorOffset -> W8 -> M ()
 set8 si so byte = do
-  sec <- ReadSector si
+  sec <- readSector si
   let sec' = writeInSector sec so byte
-  WriteSector si sec'
+  writeSector si sec'

@@ -1,18 +1,24 @@
 
 module CachedDisk
-  ( M (ReadSector,WriteSector), exec
+  ( M, exec, readSector, writeSector
   ) where
 
 import Control.Monad (ap,liftM)
 import Control.Monad.IO.Class (MonadIO,liftIO)
 import Disk qualified
 import Text.Printf (printf)
-import Types
+import Types (Sector,SectorIndex)
 
 instance Functor M where fmap = liftM
 instance Applicative M where pure = Pure; (<*>) = ap
 instance Monad M where (>>=) = Bind
 instance MonadIO M where liftIO = LiftIO
+
+readSector :: SectorIndex -> M Sector
+readSector = ReadSector
+
+writeSector :: SectorIndex -> Sector -> M ()
+writeSector = WriteSector
 
 data M a where
   Pure :: a -> M a
@@ -51,32 +57,32 @@ exec path m0 = Disk.exec path do
       Bind m f -> \k -> loop c m \c a -> loop c (f a) k
       LiftIO io -> \k -> liftIO io >>= k c
       ReadSector si -> \k -> do
-        (sec,c) <- readSector c si
+        (sec,c) <- readSectorC c si
         k c sec
       WriteSector si sec -> \k -> do
-        c <- writeSector c si sec
+        c <- writeSectorC c si sec
         k c ()
 
 flushCache :: Cache -> Disk.M ()
 flushCache Cache{theSI,theSec,dirty} = if
   | dirty -> do
-      Disk.WriteSector theSI theSec
+      Disk.writeSector theSI theSec
   | otherwise -> do
       pure ()
 
-writeSector :: Cache -> SectorIndex -> Sector -> Disk.M Cache
-writeSector c@Cache{theSI,batchedW} si sec = if
+writeSectorC :: Cache -> SectorIndex -> Sector -> Disk.M Cache
+writeSectorC c@Cache{theSI,batchedW} si sec = if
   | si == theSI -> do
       pure c { theSec = sec, dirty = True,  batchedW = 1 + batchedW }
   | otherwise -> do
       flushCache c
       pure c { theSec = sec, dirty = False }
 
-readSector :: Cache -> SectorIndex -> Disk.M (Sector, Cache)
-readSector c@Cache{theSI,theSec,hitsR} si = if
+readSectorC :: Cache -> SectorIndex -> Disk.M (Sector, Cache)
+readSectorC c@Cache{theSI,theSec,hitsR} si = if
   | si == theSI -> do
       pure (theSec, c { hitsR = 1 + hitsR })
   | otherwise -> do
       flushCache c
-      sec <- Disk.ReadSector si
+      sec <- Disk.readSector si
       pure (sec, c { theSI = si, theSec = sec, dirty = False })

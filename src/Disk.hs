@@ -1,6 +1,6 @@
 
 module Disk
-  ( M (ReadSector,WriteSector), exec
+  ( M, exec, readSector, writeSector
   ) where
 
 import Control.Monad (ap,liftM)
@@ -12,12 +12,18 @@ import GHC.IO.Device (SeekMode(AbsoluteSeek))
 import System.Posix.IO.ByteString (OpenMode(..),OpenFileFlags(..),defaultFileFlags,openFd,closeFd,fdSeek,fdRead,fdWrite)
 import System.Posix.Types (Fd,ByteCount,FileOffset)
 import Text.Printf (printf)
-import Types
+import Types (Sector,SectorIndex,mkSector,sectorSize,deSector)
 
 instance Functor M where fmap = liftM
 instance Applicative M where pure = Pure; (<*>) = ap
 instance Monad M where (>>=) = Bind
 instance MonadIO M where liftIO = LiftIO
+
+readSector :: SectorIndex -> M Sector
+readSector = ReadSector
+
+writeSector :: SectorIndex -> Sector -> M ()
+writeSector = WriteSector
 
 data M a where
   Pure :: a -> M a
@@ -46,13 +52,13 @@ exec path m0 = do
         --print ("ReadSector",si)
         let Tracking{reads} = tracking
         let tracking' = tracking { reads = Map.insertWithKey (\_ -> (+)) si 1 reads }
-        sec <- readSector path si
+        sec <- readSectorIO path si
         pure (sec, tracking')
       WriteSector si sec -> do
         --print ("WriteSector",si)
         let Tracking{writes} = tracking
         let tracking' = tracking { writes = Map.insertWithKey (\_ -> (+)) si 1 writes }
-        writeSector path si sec
+        writeSectorIO path si sec
         pure ((),tracking')
 
   (a,Tracking{reads,writes}) <- go initTracking m0
@@ -66,13 +72,13 @@ exec path m0 = do
 
 ----------------------------------------------------------------------
 
-readSector :: FilePath -> SectorIndex -> IO Sector
-readSector diskImagePath i = do
+readSectorIO :: FilePath -> SectorIndex -> IO Sector
+readSectorIO diskImagePath i = do
   withSectorSeek diskImagePath i $ \fd -> do
     mkSector <$> fdRead fd (fromIntegral sectorSize)
 
-writeSector :: FilePath -> SectorIndex -> Sector -> IO ()
-writeSector diskImagePath i s = do
+writeSectorIO :: FilePath -> SectorIndex -> Sector -> IO ()
+writeSectorIO diskImagePath i s = do
   withSectorSeek diskImagePath i $ \fd -> do
     _::ByteCount <- fdWrite fd (deSector s)
     pure ()
