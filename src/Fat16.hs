@@ -19,8 +19,8 @@ import Data.Char (toUpper)
 import Data.List.Split (splitOn)
 import GetSet (get8,get16,get32,set8,set16,getBytes)
 import Prelude hiding (interact)
-import TheDisk (M)
-import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,sectorSize,bytes16,bytes32,bytesString)
+import TheDisk (M,sectorSize)
+import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,bytes16,bytes32,bytesString)
 import Volume (bytesPerDirEntry,Vol(..))
 
 data Entry = Entry { longName :: String, item :: Item }

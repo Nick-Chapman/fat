@@ -3,13 +3,11 @@ module Types
   ( W8, W16, W32, mk16, mk32, toChar, split16, split32
   , HL(..)
   , SectorIndex
-  , Sector, sectorSize, mkSector, deSector
-  , SectorOffset, readInSector, writeInSector
+  , SectorOffset(..)
   , bytes16, bytes32, bytesString
   ) where
 
 import Data.Bits (Bits)
-import Data.ByteString qualified as B
 import Data.ByteString.Internal (w2c,c2w)
 import Data.Word (Word8,Word16,Word32)
 import Prelude hiding (interact)
@@ -51,25 +49,6 @@ newtype SectorIndex = SectorIndex W16
 
 newtype SectorOffset = SectorOffset W16 -- TODO: actually only need 9 bits
   deriving (Num,Integral,Real,Enum,Ord,Eq,Bits,Show)
-
-sectorSize :: Int
-sectorSize = 512
-
-newtype Sector = Sector [W8] -- TODO: Use mutable array representation
-
-mkSector :: B.ByteString -> Sector
-mkSector bs = Sector (map fromIntegral (B.unpack bs))
-
-deSector :: Sector -> B.ByteString
-deSector (Sector bytes) = B.pack (map fromIntegral bytes)
-
-readInSector :: Sector -> SectorOffset -> W8
-readInSector (Sector bs) (SectorOffset n) = bs !! fi n
-
-writeInSector :: Sector -> SectorOffset -> W8 -> Sector
-writeInSector (Sector bs) (SectorOffset n) b = Sector bs'
-  where
-    bs' = take (fi n) bs ++ [b] ++ drop (fi n + 1) bs -- terrible algorihmics!
 
 bytes16 :: W16 -> [W8]
 bytes16 w = [lo,hi] where HL{lo,hi} = split16 w

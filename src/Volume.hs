@@ -8,8 +8,8 @@ where
 
 import Control.Exception (assert)
 import GetSet (get8,get16)
-import TheDisk (M)
-import Types (SectorIndex,W8,W16,sectorSize)
+import TheDisk (M,sectorSize)
+import Types (SectorIndex,W8,W16)
 
 bytesPerDirEntry :: Int
 bytesPerDirEntry = 32

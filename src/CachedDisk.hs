@@ -1,13 +1,17 @@
 
 module CachedDisk
-  ( M, exec, readSector, writeSector
+  ( M, exec
+  , Sector, sectorSize
+  , readSector, writeSector
+  , readInSector, writeInSector
   ) where
 
 import Control.Monad (ap,liftM)
 import Control.Monad.IO.Class (MonadIO,liftIO)
+import Disk (Sector,sectorSize,readInSector,writeInSector)
 import Disk qualified
 import Text.Printf (printf)
-import Types (Sector,SectorIndex)
+import Types (SectorIndex)
 
 instance Functor M where fmap = liftM
 instance Applicative M where pure = Pure; (<*>) = ap

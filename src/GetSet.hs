@@ -1,8 +1,8 @@
 
 module GetSet where
 
-import TheDisk --(M, readSector)
-import Types -- (HL(..),SectorIndex,SectorOffset,W8,W16,mk16,sectorSize,readInSector)
+import TheDisk (M, readSector, writeSector, readInSector, writeInSector)
+import Types (HL(..),SectorIndex,SectorOffset,W8,W16,W32,mk16,mk32,split16)
 
 get32 :: SectorIndex -> SectorOffset -> M W32
 get32 si so = do

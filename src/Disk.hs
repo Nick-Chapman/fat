@@ -1,10 +1,14 @@
 
 module Disk
-  ( M, exec, readSector, writeSector
+  ( M, exec
+  , Sector, sectorSize
+  , readSector, writeSector
+  , readInSector, writeInSector
   ) where
 
 import Control.Monad (ap,liftM)
 import Control.Monad.IO.Class (MonadIO,liftIO)
+import Data.ByteString qualified as B
 import Data.ByteString qualified as BS (fromFilePath)
 import Data.Map (Map)
 import Data.Map qualified as Map
@@ -12,12 +16,31 @@ import GHC.IO.Device (SeekMode(AbsoluteSeek))
 import System.Posix.IO.ByteString (OpenMode(..),OpenFileFlags(..),defaultFileFlags,openFd,closeFd,fdSeek,fdRead,fdWrite)
 import System.Posix.Types (Fd,ByteCount,FileOffset)
 import Text.Printf (printf)
-import Types (Sector,SectorIndex,mkSector,sectorSize,deSector)
+import Types (SectorIndex,SectorOffset(..),W8)
 
 instance Functor M where fmap = liftM
 instance Applicative M where pure = Pure; (<*>) = ap
 instance Monad M where (>>=) = Bind
 instance MonadIO M where liftIO = LiftIO
+
+sectorSize :: Int
+sectorSize = 512
+
+newtype Sector = Sector [W8] -- TODO: Use mutable array representation
+
+mkSector :: B.ByteString -> Sector
+mkSector bs = Sector (map fromIntegral (B.unpack bs))
+
+deSector :: Sector -> B.ByteString
+deSector (Sector bytes) = B.pack (map fromIntegral bytes)
+
+readInSector :: Sector -> SectorOffset -> W8
+readInSector (Sector bs) (SectorOffset n) = bs !! fromIntegral n
+
+writeInSector :: Sector -> SectorOffset -> W8 -> Sector -- TODO M ()
+writeInSector (Sector bs) (SectorOffset n) b = Sector bs'
+  where
+    bs' = take (fromIntegral n) bs ++ [b] ++ drop (fromIntegral n + 1) bs -- terrible algorihmics!
 
 readSector :: SectorIndex -> M Sector
 readSector = ReadSector
