@@ -1,7 +1,7 @@
 module Browse (dump,interact) where
 
 import Control.Monad.IO.Class (liftIO)
-import FileTree (Tree(..),Entry(..),printTree)
+import FileTree (Tree(..),TreeEntry(..),printTree)
 import Prelude hiding (interact)
 import System.Console.ANSI qualified as AN
 import System.Console.Haskeline qualified as HL
@@ -36,7 +36,7 @@ getTree vol = do
                         ]
       pure (Tree binds)
 
-    deepEntry :: DirRecord -> M Entry
+    deepEntry :: DirRecord -> M TreeEntry
     deepEntry r@DirRecord{isDir,firstCluster=cn} = if
       | isDir -> do
           tree <- deepTree cn
