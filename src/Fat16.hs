@@ -30,20 +30,40 @@ data Dir = Root | Sub CN
 
 touch :: Vol -> String -> Dir -> M ()
 touch vol longName dir = do
-  let cn = 0
-  let entry = makeStandardEntry cn longName (FileOfSize 0)
+  let entry = makeStandardEntry 0 longName (FileOfSize 0)
   let bytes = encodeEntry longName entry
   writeDirEntry vol bytes dir
 
 echoRedirect :: Vol -> String -> String -> Dir -> M ()
 echoRedirect vol contents longName dir = do
   let fileSize = fi (length contents)
-  let entry = makeStandardEntry 0xEEEE longName (FileOfSize fileSize)
+  let entry = makeStandardEntry 0 longName (FileOfSize fileSize)
   let bytes = encodeEntry longName entry
+  -- to get byte match: nextFreeCluster; writeDirEntry
   writeDirEntry vol bytes dir
   cn <- nextFreeCluster vol
-  writeBytesInClusterChain vol cn (bytesString contents)
   setStartingCluster vol longName cn dir
+  writeBytesInClusterChain vol cn (bytesString contents)
+
+mkDir :: Vol -> String -> Dir -> M ()
+mkDir vol longName dir = do
+  -- to get byte match: nextFreeCluster; writeDirEntry
+  cn <- nextFreeCluster vol
+  let entry = makeStandardEntry cn longName Subdir
+  let bytes = encodeEntry longName entry
+  writeDirEntry vol bytes dir
+  writeBytesInClusterChain vol cn (emptyDirBytes cn dir)
+
+emptyDirBytes :: CN -> Dir -> [W8]
+emptyDirBytes cn parent =
+  (encodeStandardEntry $ makeStandardEntry cn "." Subdir) ++
+  (encodeStandardEntry $ makeStandardEntry (dir2cn parent) ".." Subdir)
+
+dir2cn :: Dir -> CN
+dir2cn = \case
+  Root -> 0
+  Sub cn -> cn
+
 
 setStartingCluster :: Vol -> String -> CN -> Dir -> M ()
 setStartingCluster vol longName cn dir =
@@ -51,21 +71,6 @@ setStartingCluster vol longName cn dir =
     Nothing -> undefined "impossible, I just added it"
     Just (si,so) -> do
       set16 si (so + 0x1A) (fi cn) -- Ox1A is offset of start-cluster in normal entry
-
-
-mkDir :: Vol -> String -> Dir -> M ()
-mkDir vol longName dir = do
-  cn <- nextFreeCluster vol
-  writeBytesInClusterChain vol cn (emptyDirBytes cn)
-  let entry = makeStandardEntry cn longName Subdir
-  let bytes = encodeEntry longName entry
-  writeDirEntry vol bytes dir
-  -- TODO: use setStartingCluster
-
-emptyDirBytes :: CN -> [W8]
-emptyDirBytes cn =
-  (encodeStandardEntry $ makeStandardEntry cn "." Subdir) ++
-  (encodeStandardEntry $ makeStandardEntry 0 ".." Subdir) -- TODO: wrong for subdirs
 
 ----------------------------------------------------------------------
 -- FIND
@@ -302,7 +307,7 @@ data StandardEntry = StandardEntry
 data Thing = FileOfSize W32 | Subdir
 
 makeStandardEntry :: CN -> String -> Thing -> StandardEntry
-makeStandardEntry cn longName thing = do -- TODO: dont take cn. will be overwrittem later
+makeStandardEntry startingCluster longName thing = do
   let (fileSize,attrByte) = case thing of
         FileOfSize n -> (n, 0x20)
         Subdir -> (0, 0x10)
@@ -312,7 +317,6 @@ makeStandardEntry cn longName thing = do -- TODO: dont take cn. will be overwrit
   let shortName = shortName8 ++ extension3
   let date = Date { year = 1997, month = 12, day = 29 }
   let time = Time { hour = 12, minute = 25, second = 02 }
-  let startingCluster = cn
   StandardEntry { shortName
                 , attrByte
                 , bdate = date
@@ -465,8 +469,11 @@ getSubDirInfo vol cn = loop "" cn 0
     loop acc cn i = if
       | i >= recordsPerCluster -> do
           cn' <- stepFatChain vol cn
-          assert (cn' /= 0xffff) $ do
-          loop acc cn' 0
+          if
+            | cn' /= 0xffff -> do
+                loop acc cn' 0
+            | otherwise -> do
+                pure []
       | otherwise -> do
           let si = siFromClusterNumber vol cn -- TODO: avoid repeat each step
           let so = fi (bytesPerDirEntry * i)

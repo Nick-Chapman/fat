@@ -28,11 +28,10 @@ echo x > file9
 echo '' > file10
 
 # touch is not quite the same as echo ''; it uses no cluser/number for the data
-#touch fileX
+touch fileX
 
 echo data1 > fileY
 echo data2 > fileZ
-echo data3 > fileOM
 
 
 # TODO: Make longNames with "." work corectly
@@ -50,6 +49,14 @@ cp /home/nic/code/quarter-forth/README.md rrr
 cp /home/nic/code/wordle/legal.sorted legal
 
 
+mkdir anotherSubDir
 
-# TODO: subdir in a subdir, not quite right yet
-# mkdir anotherSubDir
+cd anotherSubDir
+echo deep > deepfile
+cd ..
+echo back > again
+
+mkdir level3
+cd level3
+
+mkdir s1
