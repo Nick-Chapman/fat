@@ -1,5 +1,7 @@
 
-echo x > f1
+echo x > first
+echo x > first.txt
+echo x > a.b.c
 
 mkdir sub
 cd sub
@@ -33,8 +35,6 @@ touch fileX
 echo data1 > fileY
 echo data2 > fileZ
 
-
-# TODO: Make longNames with "." work corectly
 
 # copy in a file (small)
 cp /home/nic/code/quarter-forth/z.list zzz

@@ -23,6 +23,7 @@ import Prelude hiding (interact)
 import Types
 import Data.ByteString.Internal (c2w)
 import Data.Char (toUpper)
+import Data.List.Split (splitOn)
 
 data Dir = Root | Sub CN
 
@@ -30,14 +31,14 @@ data Dir = Root | Sub CN
 
 touch :: Vol -> String -> Dir -> M ()
 touch vol longName dir = do
-  let entry = makeStandardEntry 0 longName (FileOfSize 0)
+  let entry = makeStandardEntry 0 (makeShort longName) (FileOfSize 0)
   let bytes = encodeEntry longName entry
   writeDirEntry vol bytes dir
 
 echoRedirect :: Vol -> String -> String -> Dir -> M ()
 echoRedirect vol contents longName dir = do
   let fileSize = fi (length contents)
-  let entry = makeStandardEntry 0 longName (FileOfSize fileSize)
+  let entry = makeStandardEntry 0 (makeShort longName) (FileOfSize fileSize)
   let bytes = encodeEntry longName entry
   -- to get byte match: nextFreeCluster; writeDirEntry
   writeDirEntry vol bytes dir
@@ -49,7 +50,7 @@ mkDir :: Vol -> String -> Dir -> M ()
 mkDir vol longName dir = do
   -- to get byte match: nextFreeCluster; writeDirEntry
   cn <- nextFreeCluster vol
-  let entry = makeStandardEntry cn longName Subdir
+  let entry = makeStandardEntry cn (makeShort longName) Subdir
   let bytes = encodeEntry longName entry
   writeDirEntry vol bytes dir
   writeBytesInClusterChain vol cn (emptyDirBytes cn dir)
@@ -306,15 +307,26 @@ data StandardEntry = StandardEntry
 
 data Thing = FileOfSize W32 | Subdir
 
+makeShort :: String -> String
+makeShort longName = do
+  let
+    (moreThanOneDot,base,ext) = case splitOn "." (reverse longName) of
+      [] -> undefined
+      [_] -> (False,longName,"")
+      [extR,baseR] -> (False,reverse baseR, reverse extR)
+      extR:restR -> (True,reverse (concat restR), reverse extR)
+  let wontFit = length base > 8 || length ext > 3
+  let needTilda = wontFit || moreThanOneDot
+  let baseTilda = if needTilda then take 6 base ++ "~1" else base
+  let short8 = trunOrPadSpace 8 (map toUpper baseTilda)
+  let ext3 = trunOrPadSpace 3 (map toUpper ext)
+  short8 ++ ext3
+
 makeStandardEntry :: CN -> String -> Thing -> StandardEntry
-makeStandardEntry startingCluster longName thing = do
+makeStandardEntry startingCluster shortName thing = do
   let (fileSize,attrByte) = case thing of
         FileOfSize n -> (n, 0x20)
         Subdir -> (0, 0x10)
-  let max8 s = if length s > 8 then take 6 s ++ "~1" else take 8 (s ++ repeat ' ')
-  let shortName8 = max8 (map toUpper longName)
-  let extension3 = "   " -- TODO: split longname on dot
-  let shortName = shortName8 ++ extension3
   let date = Date { year = 1997, month = 12, day = 29 }
   let time = Time { hour = 12, minute = 25, second = 02 }
   StandardEntry { shortName
@@ -331,7 +343,7 @@ makeStandardEntry startingCluster longName thing = do
 encodeStandardEntry :: StandardEntry -> [W8]
 encodeStandardEntry e = do
   let StandardEntry {shortName,attrByte,btime,bdate,adate,mtime,mdate,startingCluster,fileSize} = e
-  bytesString shortName
+  bytesString (trunOrPadSpace 11 shortName)
     ++ [attrByte]
     ++ [0] -- reserved for NT
     ++ [0] -- birth 1/100s of a second
@@ -344,6 +356,8 @@ encodeStandardEntry e = do
     ++ bytes16 (fi startingCluster)
     ++ bytes32 fileSize
 
+trunOrPadSpace :: Int -> String -> String
+trunOrPadSpace n s = take n (s ++ repeat ' ')
 
 bytes16 :: W16 -> [W8]
 bytes16 w = [lo,hi] where HL{lo,hi} = split16 w

@@ -31,3 +31,4 @@ packages:
   echo transformers >> $out
   echo haskeline >> $out
   echo ansi-terminal >> $out
+  echo split >> $out
