@@ -1,5 +1,12 @@
 
 echo 111 > xxx
 echo 222 > yyy
+
 cp /home/nic/code/minimal/README.md minimal
-#rm minimal #TODO
+rm minimal
+
+#echo 333 > zzz
+
+#cp /home/nic/code/bedlam-cube/README.md bedlam
+#rm bedlam
+

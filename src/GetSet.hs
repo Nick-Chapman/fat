@@ -1,8 +1,8 @@
 
-module GetSet where
+module GetSet where -- TODO: export
 
 import TheDisk (M, loadSector, saveSector, readInSector, writeInSector)
-import Types (HL(..),SectorIndex,SectorOffset,W8,W16,W32,mk16,mk32,split16)
+import Types (HL(..),SectorIndex,SectorOffset,W8,W16,W32,mk16,mk32,split16,split32)
 
 get32 :: SectorIndex -> SectorOffset -> M W32
 get32 si so = do
@@ -20,6 +20,12 @@ get8 :: SectorIndex -> SectorOffset -> M W8
 get8 si so = do
   sec <- loadSector si
   readInSector sec so
+
+set32 :: SectorIndex -> SectorOffset -> W32 -> M ()
+set32 si so w = do
+  let HL{hi,lo} = split32 w
+  set16 si so lo
+  set16 si (so+2) hi
 
 set16 :: SectorIndex -> SectorOffset -> W16 -> M ()
 set16 si so w = do

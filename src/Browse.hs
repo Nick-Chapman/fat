@@ -1,7 +1,7 @@
 module Browse (dump,interact) where
 
 import Control.Monad.IO.Class (liftIO)
-import Fat16 (Entry(..),Item(..),File(..),Dir(..),getDirEntries,getFileContents,echoRedirect,mkDir,touch)
+import Fat16 (Entry(..),Item(..),File(..),Dir(..),getDirEntries,getFileContents,echoRedirect,mkDir,touch,rmCommand)
 import FileTree (Tree(..),TreeEntry(..),printTree)
 import Prelude hiding (interact)
 import System.Console.ANSI qualified as AN
@@ -72,6 +72,7 @@ data Com
   | Touch Name
   | CopyIn FilePath Name
   | Mkdir Name
+  | Rm Name
 
 data ParseRes = Command Com | FailedToParse | ExitCommand
 
@@ -89,6 +90,7 @@ parseCom s =
     ["touch",name] -> Command (Touch name)
     ["cp",path@('/':_),name] -> Command (CopyIn path name)
     ["mkdir",name] -> Command (Mkdir name)
+    ["rm",name] -> Command (Rm name)
     _ -> FailedToParse
 
 type Name = String
@@ -127,6 +129,9 @@ execCom vol state@State{cwd} = \case
     pure state
   Mkdir name -> do
     mkDir vol name cwd
+    pure state
+  Rm name -> do
+    rmCommand vol name cwd
     pure state
 
 catFileAction :: Vol -> File -> M ()

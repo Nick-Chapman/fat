@@ -9,6 +9,7 @@ module Fat16
   , echoRedirect
   , mkDir
   , touch
+  , rmCommand
   ) where
 
 import Control.Exception (assert)
@@ -17,7 +18,7 @@ import Data.Bits ((.&.),(.|.),shiftL,rotateR)
 import Data.ByteString.Internal (c2w)
 import Data.Char (toUpper)
 import Data.List.Split (splitOn)
-import GetSet (get8,get16,get32,set8,set16,getBytes)
+import GetSet (get8,get16,get32,set8,set16,set32,getBytes)
 import Prelude hiding (interact)
 import TheDisk (M,sectorSize)
 import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,bytes16,bytes32,bytesString)
@@ -83,6 +84,57 @@ setStartingCluster vol longName cn dir =
     Nothing -> undefined "impossible, I just added it"
     Just (si,so) -> do
       set16 si (so + 0x1A) (fi cn) -- Ox1A is offset of start-cluster in normal entry
+
+----------------------------------------------------------------------
+-- RM
+
+rmCommand :: Vol -> String -> Dir -> M ()
+rmCommand vol longName dir = do
+  findEntryAddr vol longName dir >>= \case
+    Nothing -> undefined -- cant find the file
+    Just addr -> do
+      clearDirEntries addr
+      let (si,so) = addr
+      startingCluster :: CN <- fi <$> get16 si (so + 0x1A)
+      set16 si (so + 0x1A) 0 -- zero the startingCluster
+      set32 si (so + 0x1C) 0 -- zero the file size
+      zeroBytesInClusterChain vol startingCluster
+      clearFatChain vol startingCluster
+      pure ()
+
+clearDirEntries :: Addr -> M ()
+clearDirEntries (si,so) = do
+  --TODO: super hacky: assumes long name in one entry, and that we dont cross sector
+  set8 si so 0xe5
+  set8 si (so-32) 0xe5
+
+clearFatChain :: Vol -> CN -> M ()
+clearFatChain vol = loop
+  where
+    loop :: CN -> M ()
+    loop cn = do
+      (si,so) <- cn2sio vol cn
+      cn' <- CN <$> get16 si so
+      set16 si so 0
+      let VolumeInfo{sectorsPerFat} = vol
+      set16 (si + fi sectorsPerFat) so 0 -- backup FAT
+      if cn' == 0xffff then pure () else loop cn'
+
+zeroBytesInClusterChain :: Vol -> CN -> M ()
+zeroBytesInClusterChain vol cn = loop cn
+  where
+    loop :: CN -> M ()
+    loop cn = do
+      let si = siFromClusterNumber vol cn
+      let bytes = replicate 512 0x0
+      writeSectorBytes si 0 bytes
+      cn' <- stepFatChain vol cn
+      if
+        | cn' == 0xffff -> do
+            pure ()
+        | otherwise -> do
+            loop cn'
+
 
 ----------------------------------------------------------------------
 -- FIND
