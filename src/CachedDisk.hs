@@ -8,15 +8,15 @@ module CachedDisk
 
 import Control.Monad (ap,liftM)
 import Control.Monad.IO.Class (MonadIO,liftIO)
-import Disk (Sector,sectorSize,readInSector,writeInSector)
+import Disk (Sector,sectorSize)
 import Disk qualified
 import Text.Printf (printf)
-import Types (SectorIndex)
+import Types (SectorIndex,SectorOffset,W8)
 
 instance Functor M where fmap = liftM
 instance Applicative M where pure = Pure; (<*>) = ap
 instance Monad M where (>>=) = Bind
-instance MonadIO M where liftIO = LiftIO
+instance MonadIO M where liftIO = LiftDisk . liftIO
 
 readSector :: SectorIndex -> M Sector
 readSector = ReadSector
@@ -24,10 +24,16 @@ readSector = ReadSector
 writeSector :: SectorIndex -> Sector -> M ()
 writeSector = WriteSector
 
+readInSector :: Sector -> SectorOffset -> M W8
+readInSector sec so = LiftDisk (Disk.readInSector sec so)
+
+writeInSector :: Sector -> SectorOffset -> W8 -> M ()
+writeInSector sec so b = LiftDisk (Disk.writeInSector sec so b)
+
 data M a where
   Pure :: a -> M a
   Bind :: M a -> (a -> M b) -> M b
-  LiftIO :: IO a -> M a
+  LiftDisk :: Disk.M a -> M a
   ReadSector :: SectorIndex -> M Sector
   WriteSector :: SectorIndex -> Sector -> M ()
 
@@ -59,7 +65,7 @@ exec path m0 = Disk.exec path do
     loop c = \case
       Pure x -> \k -> k c x
       Bind m f -> \k -> loop c m \c a -> loop c (f a) k
-      LiftIO io -> \k -> liftIO io >>= k c
+      LiftDisk m -> \k -> m >>= k c
       ReadSector si -> \k -> do
         (sec,c) <- readSectorC c si
         k c sec

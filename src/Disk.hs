@@ -18,29 +18,37 @@ import System.Posix.Types (Fd,ByteCount,FileOffset)
 import Text.Printf (printf)
 import Types (SectorIndex,SectorOffset(..),W8)
 
+import Data.IORef --(IORef,newIORef,readIORef,writeIORef)
+
 instance Functor M where fmap = liftM
 instance Applicative M where pure = Pure; (<*>) = ap
 instance Monad M where (>>=) = Bind
 instance MonadIO M where liftIO = LiftIO
 
+
 sectorSize :: Int
 sectorSize = 512
 
-newtype Sector = Sector [W8] -- TODO: Use mutable array representation
+newtype Sector = Sector (IORef [W8]) -- TODO: Use mutable array representation
 
-mkSector :: B.ByteString -> Sector
-mkSector bs = Sector (map fromIntegral (B.unpack bs))
+mkSector :: B.ByteString -> IO Sector
+mkSector bs = Sector <$> newIORef (map fromIntegral (B.unpack bs))
 
-deSector :: Sector -> B.ByteString
-deSector (Sector bytes) = B.pack (map fromIntegral bytes)
+deSector :: Sector -> IO B.ByteString
+deSector (Sector bsR) = do
+  bs <- liftIO (readIORef bsR)
+  pure $ B.pack (map fromIntegral bs)
 
-readInSector :: Sector -> SectorOffset -> W8
-readInSector (Sector bs) (SectorOffset n) = bs !! fromIntegral n
+readInSector :: Sector -> SectorOffset -> M W8
+readInSector (Sector bsR) (SectorOffset n) = do
+  bs <- liftIO (readIORef bsR)
+  pure (bs !! fromIntegral n)
 
-writeInSector :: Sector -> SectorOffset -> W8 -> Sector -- TODO M ()
-writeInSector (Sector bs) (SectorOffset n) b = Sector bs'
-  where
-    bs' = take (fromIntegral n) bs ++ [b] ++ drop (fromIntegral n + 1) bs -- terrible algorihmics!
+writeInSector :: Sector -> SectorOffset -> W8 -> M ()
+writeInSector (Sector bsR) (SectorOffset n) b = do
+  bs <- liftIO (readIORef bsR)
+  let bs' = take (fromIntegral n) bs ++ [b] ++ drop (fromIntegral n + 1) bs
+  liftIO (writeIORef bsR bs')
 
 readSector :: SectorIndex -> M Sector
 readSector = ReadSector
@@ -98,12 +106,13 @@ exec path m0 = do
 readSectorIO :: FilePath -> SectorIndex -> IO Sector
 readSectorIO diskImagePath i = do
   withSectorSeek diskImagePath i $ \fd -> do
-    mkSector <$> fdRead fd (fromIntegral sectorSize)
+    fdRead fd (fromIntegral sectorSize) >>= mkSector
 
 writeSectorIO :: FilePath -> SectorIndex -> Sector -> IO ()
 writeSectorIO diskImagePath i s = do
   withSectorSeek diskImagePath i $ \fd -> do
-    _::ByteCount <- fdWrite fd (deSector s)
+    bs <- deSector s
+    _::ByteCount <- fdWrite fd bs
     pure ()
 
 withSectorSeek :: FilePath -> SectorIndex -> (Fd -> IO a) -> IO a

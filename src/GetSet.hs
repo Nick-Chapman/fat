@@ -19,8 +19,7 @@ get16 si so = do
 get8 :: SectorIndex -> SectorOffset -> M W8
 get8 si so = do
   sec <- readSector si
-  let byte = readInSector sec so
-  pure byte
+  readInSector sec so
 
 set16 :: SectorIndex -> SectorOffset -> W16 -> M ()
 set16 si so w = do
@@ -31,8 +30,8 @@ set16 si so w = do
 set8 :: SectorIndex -> SectorOffset -> W8 -> M ()
 set8 si so byte = do
   sec <- readSector si
-  let sec' = writeInSector sec so byte
-  writeSector si sec'
+  writeInSector sec so byte
+  writeSector si sec
 
 getBytes :: SectorIndex -> SectorOffset -> Int -> M [W8]
 getBytes si so n = sequence [ get8 si (so + fromIntegral i) | i <- [0.. n-1] ]
