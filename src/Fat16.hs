@@ -1,13 +1,14 @@
 
 module Fat16
-  ( CN
-  , DirRecord(..) -- TODO: dont expose this
+  ( Entry (..)
+  , Item(..)
+  , File(..)
   , Dir(..)
-  , getDirInfo
+  , getDirEntries
   , getFileContents
-  , touch
   , echoRedirect
   , mkDir
+  , touch
   ) where
 
 import Control.Exception (assert)
@@ -16,13 +17,29 @@ import Data.Bits ((.&.),(.|.),shiftL,rotateR)
 import Data.ByteString.Internal (c2w)
 import Data.Char (toUpper)
 import Data.List.Split (splitOn)
+import GetSet (get8,get16,get32,set8,set16,getBytes)
 import Prelude hiding (interact)
 import TheDisk (M)
 import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,sectorSize,bytes16,bytes32,bytesString)
 import Volume (bytesPerDirEntry,Vol(..))
-import GetSet (get8,get16,get32,set8,set16,getBytes)
 
-data Dir = Root | Sub CN
+data Entry = Entry { longName :: String, item :: Item }
+
+data Item = IDir Dir | IFile File
+
+data Dir = Root | Sub { firstCluster :: CN }
+data File = File { fileSize :: W32, firstCluster :: CN }
+
+getDirEntries :: Vol -> Dir -> M [Entry]
+getDirEntries vol dir = map entryOfDR <$> getDirInfo vol dir
+
+entryOfDR :: DirRecord -> Entry
+entryOfDR DirRecord{longName,isDir,fileSize,firstCluster} =
+  Entry { longName
+        , item =
+          if isDir then IDir (Sub {firstCluster})
+          else IFile (File{fileSize,firstCluster})
+        }
 
 touch :: Vol -> String -> Dir -> M ()
 touch vol longName dir = do
@@ -460,10 +477,10 @@ getDirRecord acc si so = do
   let isDir = (attr .&. 0x10) /= 0
   pure DirRecord { kind,attr,firstCluster,fileSize,shortName,longName,isDir }
 
-getFileContents :: Vol -> DirRecord -> M String
+getFileContents :: Vol -> File -> M String
 getFileContents vol dr = do
   let VolumeInfo{sectorsPerCluster} = vol
-  let DirRecord{fileSize,firstCluster} = dr
+  let File{fileSize,firstCluster} = dr
   let clusterSize = sectorSize * fi sectorsPerCluster
   let
     loop :: CN -> Int -> M String

@@ -1,7 +1,7 @@
 module Browse (dump,interact) where
 
 import Control.Monad.IO.Class (liftIO)
-import Fat16 (DirRecord(..),Dir(..),CN,getDirInfo,getFileContents,echoRedirect,mkDir,touch)
+import Fat16 (Entry(..),Item(..),File(..),Dir(..),getDirEntries,getFileContents,echoRedirect,mkDir,touch)
 import FileTree (Tree(..),TreeEntry(..),printTree)
 import Prelude hiding (interact)
 import System.Console.ANSI qualified as AN
@@ -19,31 +19,27 @@ dump path = exec path $ do
   liftIO $ printTree tree
 
 getTree :: Vol -> M Tree
-getTree vol = do
-  rs <- getDirInfo vol Root
-  binds <- sequence [ do entry <- deepEntry r; pure (longName,entry)
-                    | r@DirRecord{longName} <- rs
-                    ]
-  pure (Tree binds)
+getTree vol = deepTree Root
   where
-    deepTree :: CN -> M Tree
-    deepTree cn = do
-      rs <- getDirInfo vol (Sub cn)
-      binds <- sequence [ do entry <- deepEntry r; pure (longName,entry)
-                        | r@DirRecord{longName} <- rs
+    deepTree :: Dir -> M Tree
+    deepTree dir = do
+      es <- getDirEntries vol dir
+      binds <- sequence [ do treeEntry <- deepEntry item
+                             pure (longName,treeEntry)
+                        | Entry{longName,item} <- es
                         , longName /= "."
                         , longName /= ".."
                         ]
       pure (Tree binds)
 
-    deepEntry :: DirRecord -> M TreeEntry
-    deepEntry r@DirRecord{isDir,firstCluster=cn} = if
-      | isDir -> do
-          tree <- deepTree cn
-          pure (ETree tree)
-      | otherwise -> do
-          contents <- getFileContents vol r
-          pure (EFile contents)
+    deepEntry :: Item -> M TreeEntry
+    deepEntry = \case
+      IDir dir -> do
+        tree <- deepTree dir
+        pure (ETree tree)
+      IFile file -> do
+        contents <- getFileContents vol file
+        pure (EFile contents)
 
 interact :: FilePath -> IO ()
 interact path = do
@@ -133,12 +129,9 @@ execCom vol state@State{cwd} = \case
     mkDir vol name cwd
     pure state
 
-data File = File DirRecord
-data Item = IDir Dir | IFile File
-
 catFileAction :: Vol -> File -> M ()
-catFileAction vol (File dr) = do
-  getFileContents vol dr >>= liftIO . putStr
+catFileAction vol file = do
+  getFileContents vol file >>= liftIO . putStr
 
 lookupSubDir :: Vol -> Dir -> Name -> M (Maybe Dir)
 lookupSubDir vol dir name =
@@ -160,23 +153,21 @@ lookupFile vol dir name =
 
 lsDirAction :: Vol -> Dir -> M ()
 lsDirAction vol dir = do
-  rs <- getDirInfo vol dir
   let
-    showRec :: DirRecord -> IO ()
-    showRec DirRecord{longName,fileSize,isDir} = do
-      let i :: Int = fromIntegral fileSize
-      let mode = (if isDir then "d" else "-")
-      let slashMaybe = (if isDir then "/" else "")
-      printf "%s %6i  %s%s\n" mode i longName slashMaybe
-  mapM_ (liftIO . showRec) rs
+    showEntry :: Entry -> IO ()
+    showEntry Entry{longName,item} = case item of
+      IDir{} -> printf "- %6i  %s/\n" (0::Int) longName -- TODO: dir size
+      IFile (File {fileSize}) ->
+        printf "- %6i  %s\n" (fromIntegral fileSize :: Int) longName
+
+  es <- getDirEntries vol dir
+  mapM_ (liftIO . showEntry) es
 
 lookupItem :: Vol -> Dir -> Name -> M (Maybe Item)
 lookupItem vol dir sought = do
-  rs <- getDirInfo vol dir -- TODO: be incremental?
-  case [ if isDir
-         then IDir (if firstCluster == 0 then Root else Sub firstCluster)
-         else IFile (File dr)
-       | dr@DirRecord{longName,isDir,firstCluster} <- rs
+  es <- getDirEntries vol dir -- TODO: be incremental?
+  case [ item
+       | Entry{longName,item} <- es
        , longName == sought
        ] of
     item:_ -> pure (Just item)
