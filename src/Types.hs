@@ -5,11 +5,12 @@ module Types
   , SectorIndex
   , Sector, sectorSize, mkSector, deSector
   , SectorOffset, readInSector, writeInSector
+  , bytes16, bytes32, bytesString
   ) where
 
 import Data.Bits (Bits)
 import Data.ByteString qualified as B
-import Data.ByteString.Internal (w2c)
+import Data.ByteString.Internal (w2c,c2w)
 import Data.Word (Word8,Word16,Word32)
 import Prelude hiding (interact)
 import Text.Printf (printf)
@@ -69,3 +70,12 @@ writeInSector :: Sector -> SectorOffset -> W8 -> Sector
 writeInSector (Sector bs) (SectorOffset n) b = Sector bs'
   where
     bs' = take (fi n) bs ++ [b] ++ drop (fi n + 1) bs -- terrible algorihmics!
+
+bytes16 :: W16 -> [W8]
+bytes16 w = [lo,hi] where HL{lo,hi} = split16 w
+
+bytes32 :: W32 -> [W8]
+bytes32 w = bytes16 lo ++ bytes16 hi where HL{lo,hi} = split32 w
+
+bytesString :: String -> [W8]
+bytesString str = [ fi (c2w c) | c <- str ]

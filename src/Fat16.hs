@@ -17,9 +17,10 @@ import Data.ByteString.Internal (c2w)
 import Data.Char (toUpper)
 import Data.List.Split (splitOn)
 import Prelude hiding (interact)
-import TheDisk (M,readSector,writeSector)
-import Types (HL(..),W8,W16,W32,SectorIndex,SectorOffset,split16,mk32,writeInSector,toChar,sectorSize,split32)
-import Volume (bytesPerDirEntry,Vol(..),get8,get16)
+import TheDisk (M)
+import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,sectorSize,bytes16,bytes32,bytesString)
+import Volume (bytesPerDirEntry,Vol(..))
+import GetSet (get8,get16,get32,set8,set16,getBytes)
 
 data Dir = Root | Sub CN
 
@@ -349,15 +350,6 @@ encodeStandardEntry e = do
 trunOrPadSpace :: Int -> String -> String
 trunOrPadSpace n s = take n (s ++ repeat ' ')
 
-bytes16 :: W16 -> [W8]
-bytes16 w = [lo,hi] where HL{lo,hi} = split16 w
-
-bytes32 :: W32 -> [W8]
-bytes32 w = bytes16 lo ++ bytes16 hi where HL{lo,hi} = split32 w
-
-bytesString :: String -> [W8]
-bytesString str = [ fi (c2w c) | c <- str ]
-
 data Date = Date
   { year  :: Int -- (7 bits) 0..119 (1980..2099)
   , month :: Int -- (4 bits) 1..12
@@ -527,24 +519,3 @@ newtype CN = CN W16 deriving (Num,Integral,Real,Enum,Ord,Eq,Show)
 
 data DirRecordKind = DRK_Normal | DRK_Long | DRK_Unused | DRK_EndOfDir
   deriving (Show,Eq)
-
-getBytes :: SectorIndex -> SectorOffset -> Int -> M [W8]
-getBytes si so n = sequence [ get8 si (so + fi i) | i <- [0.. n-1] ]
-
-get32 :: SectorIndex -> SectorOffset -> M W32
-get32 si so = do
-  lo <- get16 si so
-  hi <- get16 si (so+2)
-  pure (mk32 HL {hi,lo})
-
-set16 :: SectorIndex -> SectorOffset -> W16 -> M ()
-set16 si so w = do
-  let HL{hi,lo} = split16 w
-  set8 si so lo
-  set8 si (so+1) hi
-
-set8 :: SectorIndex -> SectorOffset -> W8 -> M ()
-set8 si so byte = do
-  sec <- readSector si
-  let sec' = writeInSector sec so byte
-  writeSector si sec'

@@ -3,15 +3,13 @@ module Volume
   ( bytesPerDirEntry
   , Vol(..)
   , getVolumeInfo
-  , get8
-  , get16
   )
 where
 
-import TheDisk (M, readSector)
 import Control.Exception (assert)
-import Prelude hiding (interact)
-import Types (HL(..),SectorIndex,SectorOffset,W8,W16,mk16,sectorSize,readInSector)
+import GetSet (get8,get16)
+import TheDisk (M)
+import Types (SectorIndex,W8,W16,sectorSize)
 
 bytesPerDirEntry :: Int
 bytesPerDirEntry = 32
@@ -55,15 +53,3 @@ getVolumeInfo si = do
                   , rootDirBegin
                   , clusterBegin
                   }
-
-get16 :: SectorIndex -> SectorOffset -> M W16
-get16 si so = do
-  lo <- get8 si so
-  hi <- get8 si (so+1)
-  pure (mk16 HL{hi,lo})
-
-get8 :: SectorIndex -> SectorOffset -> M W8
-get8 si so = do
-  sec <- readSector si
-  let byte = readInSector sec so
-  pure byte
