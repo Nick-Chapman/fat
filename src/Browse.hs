@@ -1,16 +1,15 @@
 module Browse (dump,interact) where
 
 import Control.Monad.IO.Class (liftIO)
+import Fat16 (DirRecord(..),Dir(..),CN,VolumeInfo,getVolumeInfo,getDirInfo,getFileContents,echoRedirect,mkDir,touch)
 import FileTree (Tree(..),TreeEntry(..),printTree)
 import Prelude hiding (interact)
 import System.Console.ANSI qualified as AN
 import System.Console.Haskeline qualified as HL
-import System.IO qualified as IO (stderr)
 import System.IO (hFlush,hPutStrLn)
+import System.IO qualified as IO (stderr)
 import Text.Printf (printf)
 import TheDisk (M,exec)
-
-import Fat16
 
 dump :: FilePath -> IO ()
 dump path = exec path $ do
