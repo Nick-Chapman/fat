@@ -90,23 +90,36 @@ setStartingCluster vol longName cn dir =
 
 rmCommand :: Vol -> String -> Dir -> M ()
 rmCommand vol longName dir = do
-  findEntryAddr vol longName dir >>= \case
-    Nothing -> undefined -- cant find the file
-    Just addr -> do
-      clearDirEntries addr
-      let (si,so) = addr
-      startingCluster :: CN <- fi <$> get16 si (so + 0x1A)
-      set16 si (so + 0x1A) 0 -- zero the startingCluster
-      set32 si (so + 0x1C) 0 -- zero the file size
-      zeroBytesInClusterChain vol startingCluster
-      clearFatChain vol startingCluster
-      pure ()
+  findEntryAddresses vol longName dir >>= \case
+    Nothing -> pure () -- nothing to remove
+    Just (longAs,addr) -> do
+      markEntryAddrUnused addr
+      mapM_ markEntryAddrUnused longAs
+      cn <- startingClusterFromAddr addr
+      zeroOutClusterAndSizeInfo addr
+      zeroBytesInClusterChain vol cn
+      clearFatChain vol cn
 
-clearDirEntries :: Addr -> M ()
-clearDirEntries (si,so) = do
-  --TODO: super hacky: assumes long name in one entry, and that we dont cross sector
-  set8 si so 0xe5
-  set8 si (so-32) 0xe5
+{-
+_findEntryAddresses_OLD :: Vol -> String -> Dir -> M (Maybe ([Addr],Addr))
+_findEntryAddresses_OLD vol longName dir =
+  findEntryAddr vol longName dir >>= \case
+    Nothing -> pure Nothing
+    --TODO: super hacky: assumes long name in one entry, and that we dont cross sector
+    Just (si,so) -> pure $ Just ([ (si,so - 32) ], (si, so) )
+-}
+
+
+startingClusterFromAddr :: Addr -> M CN
+startingClusterFromAddr (si,so) = fi <$> get16 si (so + 0x1A)
+
+markEntryAddrUnused :: Addr -> M ()
+markEntryAddrUnused (si,so) = set8 si so 0xe5
+
+zeroOutClusterAndSizeInfo :: Addr -> M ()
+zeroOutClusterAndSizeInfo (si,so) = do
+  set16 si (so + 0x1A) 0 -- zero the startingCluster
+  set32 si (so + 0x1C) 0 -- zero the file size
 
 clearFatChain :: Vol -> CN -> M ()
 clearFatChain vol = loop
@@ -160,7 +173,7 @@ findRootEntryAddr VolumeInfo{rootDirBegin} sought = loop "" rootDirBegin 0
             DRK_EndOfDir -> pure Nothing
             DRK_Unused -> loop acc si (i+1)
             DRK_Long -> do
-              part <- getLongNamePart si so
+              part <- getLongNameChunk (si,so)
               loop (part++acc) si (i+1)
             DRK_Normal -> if
               | acc == sought -> pure (Just (si,so))
@@ -186,7 +199,7 @@ findSubEntryAddr vol sought cn = loop "" cn 0
             DRK_EndOfDir -> pure Nothing
             DRK_Unused -> loop acc cn (i+1)
             DRK_Long -> do
-              part <- getLongNamePart si so
+              part <- getLongNameChunk (si,so)
               loop (part++acc) cn (i+1)
             DRK_Normal -> if
               | acc == sought -> pure (Just (si,so))
@@ -371,7 +384,7 @@ makeShort :: String -> String
 makeShort longName = do
   let
     (moreThanOneDot,base,ext) = case splitOn "." (reverse longName) of
-      [] -> undefined
+      [] -> undefined -- empty name not allowed
       [_] -> (False,longName,"")
       [extR,baseR] -> (False,reverse baseR, reverse extR)
       extR:restR -> (True,reverse (concat restR), reverse extR)
@@ -470,7 +483,7 @@ getRootDirInfo VolumeInfo{rootDirBegin} = loop "" rootDirBegin 0
             DRK_EndOfDir -> pure []
             DRK_Unused -> loop acc si (i+1)
             DRK_Long -> do
-              part <- getLongNamePart si so
+              part <- getLongNameChunk (si,so)
               loop (part++acc) si (i+1)
             DRK_Normal -> do
               drs <- loop "" si (i+1)
@@ -498,16 +511,11 @@ getSubDirInfo vol cn = loop "" cn 0
             DRK_EndOfDir -> pure []
             DRK_Unused -> loop acc cn (i+1)
             DRK_Long -> do
-              part <- getLongNamePart si so
+              part <- getLongNameChunk (si,so)
               loop (part++acc) cn (i+1)
             DRK_Normal -> do
               drs <- loop "" cn (i+1)
               pure (dr:drs)
-
-getLongNamePart :: SectorIndex -> SectorOffset -> M String
-getLongNamePart si so = do
-  bs <- sequence [ get8 si (so+i) | i <- [1,3,5,7,9, 14,16,18,20,22,24, 28,30] ]
-  pure [ toChar b | b <- takeWhile (/=0) bs ]
 
 getDirRecord :: String -> SectorIndex -> SectorOffset -> M DirRecord
 getDirRecord acc si so = do
@@ -568,11 +576,6 @@ cn2sio vol cn = do
   --see ("cn2sio",cn,"->",si,so)
   pure (si,so)
 
-siFromClusterNumber :: Vol -> CN -> SectorIndex
-siFromClusterNumber vol cn = do
-  let VolumeInfo{sectorsPerCluster,clusterBegin} = vol
-  clusterBegin + (fi cn - 2) * fi sectorsPerCluster
-
 data DirRecord = DirRecord
   { kind :: DirRecordKind
   , attr :: W8
@@ -588,3 +591,124 @@ newtype CN = CN W16 deriving (Num,Integral,Real,Enum,Ord,Eq,Show)
 
 data DirRecordKind = DRK_Normal | DRK_Long | DRK_Unused | DRK_EndOfDir
   deriving (Show,Eq)
+
+----------------------------------------------------------------------
+-- new directory stuff -- TODO: make this subsume all previous dir decodin
+
+findEntryAddresses :: Vol -> String -> Dir -> M (Maybe ([Addr],Addr))
+findEntryAddresses vol sought dir = do
+  findSlotGroup vol sought dir >>= \case
+    Nothing -> pure Nothing
+    Just (longs,short) -> do
+      pure $ Just (map longAddr longs, shortAddr short)
+
+findSlotGroup :: Vol -> String -> Dir -> M (Maybe SlotGroup)
+findSlotGroup vol sought dir = do
+  let
+    loop :: [SlotGroup] -> Maybe SlotGroup
+    loop = \case
+      [] -> Nothing
+      g:gs -> if longNameOfGroup g == sought then Just g else loop gs
+  slots <- dirEntrySlots vol dir
+  pure $ loop (groupSlots slots)
+
+type SlotGroup = ([LongSlot],ShortSlot)
+
+longNameOfGroup :: SlotGroup -> String
+longNameOfGroup (longs,_) =
+  concat [ nameChunk | LongSlot{nameChunk} <- reverse longs ]
+
+groupSlots :: [EntrySlot] -> [SlotGroup]
+groupSlots = loop []
+  where
+    loop :: [LongSlot] -> [EntrySlot] -> [SlotGroup]
+    loop longs = \case
+      [] -> undefined -- we always have a end-slot
+      slot:slots -> do
+        case slot of
+          ES_Long long -> loop (long:longs) slots
+          ES_Short short -> (reverse longs, short) : loop [] slots
+          ES_Open{} -> undefined -- TODO
+          ES_OpenEnd -> do
+            assert (case longs of [] -> True; _ -> False) $ do
+            []
+
+dirEntrySlots :: Vol -> Dir -> M [EntrySlot]
+dirEntrySlots vol dir = do
+  addrs <- dirEntryAdresses vol dir
+  sequence [ decodeEntrySlot vol addr | addr <- addrs ]
+
+dirEntryAdresses :: Vol -> Dir -> M [Addr]
+dirEntryAdresses vol dir = do
+  sis <- dirSectors vol dir
+  pure [ addr | si <- sis, addr <- entryAddressesAtSector si ]
+
+dirSectors :: Vol -> Dir -> M [SectorIndex]
+dirSectors vol = \case
+  Root -> pure $ rootSectors vol
+  Sub cn -> expandClusterChainFrom vol cn
+
+rootSectors :: Vol -> [SectorIndex]
+rootSectors vol = do
+  let VolumeInfo{rootDirBegin} = vol
+  let n = 1 -- TODO
+  take n [rootDirBegin .. ]
+
+expandClusterChainFrom :: Vol -> CN -> M [SectorIndex]
+expandClusterChainFrom vol = loop
+  where
+    loop cn = do
+      let si = siFromClusterNumber vol cn
+      (si:) <$> do
+        nextCN vol cn >>= \case
+          Nothing -> pure []
+          Just cn' -> loop cn'
+
+-- This is the core computation...
+siFromClusterNumber :: Vol -> CN -> SectorIndex
+siFromClusterNumber vol cn = do
+  let VolumeInfo{sectorsPerCluster,clusterBegin} = vol
+  clusterBegin + (fi cn - 2) * fi sectorsPerCluster
+
+nextCN :: Vol -> CN -> M (Maybe CN)
+nextCN _ _ = undefined -- TODO
+
+entryAddressesAtSector :: SectorIndex -> [Addr] -- # (512/32 = 16)
+entryAddressesAtSector si = do
+  let sizeDirSlot = 32
+  let numEntrySlotsInSector = sectorSize `div` sizeDirSlot
+  [ (si,32 * so) | so <- take numEntrySlotsInSector [0..] ]
+
+decodeEntrySlot :: Vol -> Addr -> M EntrySlot
+decodeEntrySlot _vol addr@(si,so) = do
+  firstByte <- get8 si so
+  attr <- get8 si (so+0xB)
+  if
+    | firstByte == 0x00 -> pure ES_OpenEnd
+    | firstByte == 0xE5 -> pure ES_Open
+    | (attr .&. 0xF) == 0xF -> do
+        nameChunk <- getLongNameChunk addr
+        pure (ES_Long (LongSlot {addr,nameChunk}))
+    | otherwise -> do
+        pure (ES_Short (ShortSlot {addr}))
+
+-- grabbed this from earlier coding
+getLongNameChunk :: Addr -> M String
+getLongNameChunk (si,so) = do
+  bs <- sequence [ get8 si (so+i) | i <- [1,3,5,7,9, 14,16,18,20,22,24, 28,30] ]
+  pure [ toChar b | b <- takeWhile (/=0) bs ]
+
+data EntrySlot
+  = ES_Long LongSlot
+  | ES_Short ShortSlot
+  | ES_Open
+  | ES_OpenEnd
+
+data LongSlot = LongSlot { addr :: Addr, nameChunk :: String }
+data ShortSlot = ShortSlot { addr :: Addr }
+
+longAddr :: LongSlot -> Addr
+longAddr LongSlot{addr} = addr
+
+shortAddr :: ShortSlot -> Addr
+shortAddr ShortSlot{addr} = addr
