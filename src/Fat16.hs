@@ -1,33 +1,27 @@
 
 module Fat16
-  ( VolumeInfo
+  ( CN
   , DirRecord(..) -- TODO: dont expose this
-  , CN
-  , getVolumeInfo
-
   , Dir(..)
   , getDirInfo
-
   , getFileContents
-
   , touch
   , echoRedirect
   , mkDir
   ) where
 
-import TheDisk (M (ReadSector,WriteSector))
 import Control.Exception (assert)
 import Control.Monad.IO.Class (liftIO)
 import Data.Bits ((.&.),(.|.),shiftL,rotateR)
-import Prelude hiding (interact)
-import Types
 import Data.ByteString.Internal (c2w)
 import Data.Char (toUpper)
 import Data.List.Split (splitOn)
+import Prelude hiding (interact)
+import TheDisk (M (ReadSector,WriteSector))
+import Types (HL(..),W8,W16,W32,SectorIndex,SectorOffset,split16,mk32,writeInSector,toChar,sectorSize,split32)
+import Volume (bytesPerDirEntry,Vol(..),get8,get16)
 
 data Dir = Root | Sub CN
-
-----------------------------------------------------------------------
 
 touch :: Vol -> String -> Dir -> M ()
 touch vol longName dir = do
@@ -65,7 +59,6 @@ dir2cn = \case
   Root -> 0
   Sub cn -> cn
 
-
 setStartingCluster :: Vol -> String -> CN -> Dir -> M ()
 setStartingCluster vol longName cn dir =
   findEntryAddr vol longName dir >>= \case
@@ -102,7 +95,6 @@ findRootEntryAddr VolumeInfo{rootDirBegin} sought = loop "" rootDirBegin 0
             DRK_Normal -> if
               | acc == sought -> pure (Just (si,so))
               | otherwise -> loop "" si (i+1)
-
 
 findSubEntryAddr :: Vol -> String -> CN -> M (Maybe Addr)
 findSubEntryAddr vol sought cn = loop "" cn 0
@@ -192,7 +184,6 @@ writeDirEntry vol bytes = \case
   Root -> writeRootDirEntry vol bytes
   Sub cn -> writeSubDirEntry vol bytes cn
 
-
 writeRootDirEntry :: Vol -> [W8] -> M ()
 writeRootDirEntry vol bytes = do
   (si,so) <- findRootDirNextEntry vol
@@ -262,7 +253,6 @@ nextCluster1 vol cn = do
         --let cn' = 1 + cn'0
         setNextCluser vol cn (fi cn')
         pure cn'
-
 
 ----------------------------------------------------------------------
 -- DIRECTORY encode
@@ -394,67 +384,18 @@ timeWord Time{hour,minute,second} =
   ((fi minute `mod` 64) `shiftL` 5) .|.
   (fi (second `div` 2) `mod` 32)
 
-----------------------------------------------------------------------
-
-type Vol = VolumeInfo
-
 _see :: Show a => a -> M ()
 _see = liftIO .print
 
 fi :: (Integral a, Num b) => a -> b
 fi x = fromIntegral x
 
-bytesPerDirEntry :: Int
-bytesPerDirEntry = 32
-
-data VolumeInfo = VolumeInfo
-  { sectorsPerCluster :: W8
-  , sectorsPerFat :: W16
-  , fatBegin :: SectorIndex
-  , rootDirBegin :: SectorIndex
-  , clusterBegin :: SectorIndex
-  } deriving Show
-
-
-getVolumeInfo :: SectorIndex -> M VolumeInfo
-getVolumeInfo si = do
-  bytesPerSector <- get16 si 0xB
-  sectorsPerCluster <- get8 si 0xD
-  numberReservedSectors <- get16 si 0xE
-  numberOfFats <- get8 si 0x10
-  numberOfRootEntries <- get16 si 0x11
-  sectorsPerFat <- get16 si 0x16
-  sig <- get16 si 0x1FE
-
-  assert (fi bytesPerSector == sectorSize) $ do
-  assert (sectorsPerCluster == 1) $ do
-  assert (numberOfFats == 2) $ do
-  assert (numberReservedSectors == 1) $ do
-  assert (sig == 0xAA55) $ do
-
-  let numberOfDirEntriesPerSector = fi (sectorSize `div` bytesPerDirEntry)
-  assert (numberOfDirEntriesPerSector == 16) $ do
-  assert (numberOfRootEntries `mod` numberOfDirEntriesPerSector == 0) $ do
-  let sectorsForRootDir = numberOfRootEntries `div` numberOfDirEntriesPerSector
-
-  let fatBegin = si + fi numberReservedSectors
-  let rootDirBegin = fatBegin + fi sectorsPerFat * fi numberOfFats
-  let clusterBegin = rootDirBegin + fi sectorsForRootDir
-
-  pure VolumeInfo { sectorsPerCluster
-                  , sectorsPerFat
-                  , fatBegin
-                  , rootDirBegin
-                  , clusterBegin
-                  }
-
-
 getDirInfo :: Vol -> Dir -> M [DirRecord]
 getDirInfo vol = \case
   Root -> getRootDirInfo vol
   Sub cn -> getSubDirInfo vol cn
 
-getRootDirInfo :: VolumeInfo -> M [DirRecord]
+getRootDirInfo :: Vol -> M [DirRecord]
 getRootDirInfo VolumeInfo{rootDirBegin} = loop "" rootDirBegin 0
   where
     loop :: String -> SectorIndex -> Int -> M [DirRecord]
@@ -474,7 +415,7 @@ getRootDirInfo VolumeInfo{rootDirBegin} = loop "" rootDirBegin 0
               drs <- loop "" si (i+1)
               pure (dr:drs)
 
-getSubDirInfo :: VolumeInfo -> CN -> M [DirRecord]
+getSubDirInfo :: Vol -> CN -> M [DirRecord]
 getSubDirInfo vol cn = loop "" cn 0
   where
     VolumeInfo{sectorsPerCluster} = vol
@@ -527,7 +468,7 @@ getDirRecord acc si so = do
   let isDir = (attr .&. 0x10) /= 0
   pure DirRecord { kind,attr,firstCluster,fileSize,shortName,longName,isDir }
 
-getFileContents :: VolumeInfo -> DirRecord -> M String
+getFileContents :: Vol -> DirRecord -> M String
 getFileContents vol dr = do
   let VolumeInfo{sectorsPerCluster} = vol
   let DirRecord{fileSize,firstCluster} = dr
@@ -549,13 +490,12 @@ getFileContents vol dr = do
 
 -- This become a big performace drain as the disk fill up.
 -- TOOO: support some kind of FAT caching
-stepFatChain ::VolumeInfo -> CN -> M CN
+stepFatChain ::Vol -> CN -> M CN
 stepFatChain vol cn = do
   (si,so) <- cn2sio vol cn
   cn' <- CN <$> get16 si so
   -- _see("stepFatChain",cn,(si,so),"-->",cn')
   pure cn'
-
 
 cn2sio :: Vol -> CN -> M (SectorIndex,SectorOffset)
 cn2sio vol cn = do
@@ -567,7 +507,7 @@ cn2sio vol cn = do
   --see ("cn2sio",cn,"->",si,so)
   pure (si,so)
 
-siFromClusterNumber :: VolumeInfo -> CN -> SectorIndex
+siFromClusterNumber :: Vol -> CN -> SectorIndex
 siFromClusterNumber vol cn = do
   let VolumeInfo{sectorsPerCluster,clusterBegin} = vol
   clusterBegin + (fi cn - 2) * fi sectorsPerCluster
@@ -596,19 +536,6 @@ get32 si so = do
   lo <- get16 si so
   hi <- get16 si (so+2)
   pure (mk32 HL {hi,lo})
-
-get16 :: SectorIndex -> SectorOffset -> M W16
-get16 si so = do
-  lo <- get8 si so
-  hi <- get8 si (so+1)
-  pure (mk16 HL{hi,lo})
-
-get8 :: SectorIndex -> SectorOffset -> M W8
-get8 si so = do
-  sec <- ReadSector si
-  let byte = readInSector sec so
-  pure byte
-
 
 set16 :: SectorIndex -> SectorOffset -> W16 -> M ()
 set16 si so w = do

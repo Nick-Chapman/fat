@@ -1,7 +1,7 @@
 module Browse (dump,interact) where
 
 import Control.Monad.IO.Class (liftIO)
-import Fat16 (DirRecord(..),Dir(..),CN,VolumeInfo,getVolumeInfo,getDirInfo,getFileContents,echoRedirect,mkDir,touch)
+import Fat16 (DirRecord(..),Dir(..),CN,getDirInfo,getFileContents,echoRedirect,mkDir,touch)
 import FileTree (Tree(..),TreeEntry(..),printTree)
 import Prelude hiding (interact)
 import System.Console.ANSI qualified as AN
@@ -10,6 +10,7 @@ import System.IO (hFlush,hPutStrLn)
 import System.IO qualified as IO (stderr)
 import Text.Printf (printf)
 import TheDisk (M,exec)
+import Volume (Vol,getVolumeInfo)
 
 dump :: FilePath -> IO ()
 dump path = exec path $ do
@@ -17,7 +18,7 @@ dump path = exec path $ do
   tree <- getTree vol
   liftIO $ printTree tree
 
-getTree :: VolumeInfo -> M Tree
+getTree :: Vol -> M Tree
 getTree vol = do
   rs <- getDirInfo vol Root
   binds <- sequence [ do entry <- deepEntry r; pure (longName,entry)
@@ -93,8 +94,6 @@ parseCom s =
     ["cp",path@('/':_),name] -> Command (CopyIn path name)
     ["mkdir",name] -> Command (Mkdir name)
     _ -> FailedToParse
-
-type Vol = VolumeInfo
 
 type Name = String
 
