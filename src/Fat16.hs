@@ -27,19 +27,26 @@ import Prelude hiding (interact)
 import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,bytes16,bytes32,bytesString)
 import Volume (bytesPerDirEntry,Vol(..),CN(..))
 
-data Entry = Entry { longName :: String, item :: Item }
-data Item = IDir Dir | IFile File
-data Dir = Root | Sub { firstCluster :: CN }
-data File = File { fileSize :: W32, firstCluster :: CN }
+data Entry = Entry { longName :: String, item :: Item } deriving Show
+data Item = IDir Dir | IFile File deriving Show
+data Dir = Root | Sub { firstCluster :: CN } deriving Show
+data File = File { fileSize :: W32, firstCluster :: CN } deriving Show
 
 getDirEntries :: Dir -> M [Entry]
-getDirEntries dir = map entryOfDR <$> getDirInfo dir
+getDirEntries dir = do
+  --liftIO $ print ("getDirEntries", dir)
+  es <- getDirEntries1 dir
+  --liftIO $ mapM_ print es
+  pure es
+
+getDirEntries1 :: Dir -> M [Entry]
+getDirEntries1 dir = map entryOfDR <$> getDirInfo dir
 
 entryOfDR :: DirRecord -> Entry
 entryOfDR DirRecord{longName,isDir,fileSize,firstCluster} =
   Entry { longName
         , item =
-          if isDir then IDir (Sub {firstCluster})
+          if isDir then IDir (if firstCluster == 0 then Root else Sub {firstCluster})
           else IFile (File{fileSize,firstCluster})
         }
 
@@ -572,7 +579,6 @@ dirEntrySlots dir = do
 dirEntryAdresses :: Dir -> M [Addr]
 dirEntryAdresses dir = do
   sis <- dirSectors dir
-  --liftIO $ print ("dirSectors", sis) --TODO
   pure [ addr | si <- sis, addr <- entryAddressesAtSector si ]
 
 dirSectors :: Dir -> M [SectorIndex]

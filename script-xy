@@ -4,8 +4,6 @@ echo x > first
 echo x > first.txt
 echo x > a.b.c
 
-# TODO need tests at root and i sub
-# oops, I have a diff when we work at root -- see later
 mkdir sub
 cd sub
 
@@ -18,10 +16,7 @@ echo q > f4
 echo q > f5
 echo q > f6
 echo q > f7
-
 echo q > f8
-
-# exit # TODO: mke new dir code work past here
 
 echo qqq > f9
 
@@ -55,9 +50,8 @@ cp /home/nic/code/quarter-forth/README.md rrr
 # Stress with a really big file...
 cp /home/nic/code/wordle/legal.sorted legal
 
-mkdir anotherSubDir
 
-# TODO: cd'ing in to anotherSubDir & out again, cause hd diffs when start at root
+mkdir anotherSubDir
 cd anotherSubDir
 echo deep > deepfile
 cd ..
