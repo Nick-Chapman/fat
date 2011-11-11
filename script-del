@@ -11,3 +11,6 @@ rm minimal
 
 echo 444 > abcdefghijk234
 echo 555 > short
+
+rm short
+echo 666 > poo

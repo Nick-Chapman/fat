@@ -3,7 +3,7 @@ module Volume
   ( bytesPerDirEntry
   , Vol(..)
   , getVolumeInfo
-  , CN(..), getLastAllocatedCN, setLastAllocatedCN
+  , CN(..), getNextCandidateCN, setLastAllocatedCN
   )
 where
 
@@ -17,10 +17,11 @@ import Types (SectorIndex,W8,W16)
 -- Cluster Number
 newtype CN = CN W16 deriving (Num,Integral,Real,Enum,Ord,Eq,Show)
 
-getLastAllocatedCN :: Vol -> M CN
-getLastAllocatedCN vol = do
+getNextCandidateCN :: Vol -> M CN
+getNextCandidateCN vol = do
   let VolumeInfo{lastAllocatedCN} = vol
-  liftIO $ readIORef lastAllocatedCN
+  cn <- liftIO $ readIORef lastAllocatedCN
+  pure (cn + 1)
 
 setLastAllocatedCN :: Vol -> CN -> M ()
 setLastAllocatedCN vol cn = do
@@ -64,7 +65,7 @@ getVolumeInfo si = do
   let rootDirBegin = fatBegin + fromIntegral sectorsPerFat * fromIntegral numberOfFats
   let clusterBegin = rootDirBegin + fromIntegral sectorsForRootDir
 
-  lastAllocatedCN <- liftIO $ newIORef (CN 3)
+  lastAllocatedCN <- liftIO $ newIORef (CN 2)
 
   pure VolumeInfo { sectorsPerCluster
                   , sectorsPerFat

@@ -23,7 +23,7 @@ import GetSet (get8,get16,get32,set8,set16,set32,getBytes)
 import Prelude hiding (interact)
 import TheDisk (M,sectorSize)
 import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,bytes16,bytes32,bytesString)
-import Volume (bytesPerDirEntry,Vol(..),CN(..),getLastAllocatedCN,setLastAllocatedCN)
+import Volume (bytesPerDirEntry,Vol(..),CN(..),getNextCandidateCN,setLastAllocatedCN)
 
 data Entry = Entry { longName :: String, item :: Item }
 
@@ -636,7 +636,7 @@ stepFatChain vol cn = do
   pure cn'
 
 allocteCluster :: Vol -> M CN
-allocteCluster vol = getLastAllocatedCN vol >>= loop
+allocteCluster vol = getNextCandidateCN vol >>= loop
   where
     loop :: CN -> M CN
     loop cn = do
