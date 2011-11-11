@@ -46,16 +46,14 @@ entryOfDR DirRecord{longName,isDir,fileSize,firstCluster} =
 touch :: Vol -> (Date,Time) -> String -> Dir -> M ()
 touch vol dt longName dir = do
   let entry = makeStandardEntry dt 0 (makeShort longName) (FileOfSize 0)
-  let bytes = encodeEntry longName entry
-  writeDirEntry vol bytes dir
+  writeDirEntry vol longName entry dir
 
 echoRedirect :: Vol -> (Date,Time) -> String -> String -> Dir -> M ()
 echoRedirect vol dt contents longName dir = do
   let fileSize = fi (length contents)
   let entry = makeStandardEntry dt 0 (makeShort longName) (FileOfSize fileSize)
-  let bytes = encodeEntry longName entry
   -- to get byte match: allocteCluster; writeDirEntry
-  writeDirEntry vol bytes dir
+  writeDirEntry vol longName entry dir
   cn <- allocteCluster vol
   setStartingCluster vol longName cn dir
   writeBytesInClusterChain vol cn (bytesString contents)
@@ -65,8 +63,7 @@ mkDir vol dt longName dir = do
   -- to get byte match: allocteCluster; writeDirEntry
   cn <- allocteCluster vol
   let entry = makeStandardEntry dt cn (makeShort longName) Subdir
-  let bytes = encodeEntry longName entry
-  writeDirEntry vol bytes dir
+  writeDirEntry vol longName entry dir
   writeBytesInClusterChain vol cn (emptyDirBytes dt cn dir)
 
 emptyDirBytes :: (Date,Time) -> CN -> Dir -> [W8]
@@ -245,14 +242,20 @@ writeSectorBytes si so0 bytes = do
 ----------------------------------------------------------------------
 -- DIRECTORY write
 
-writeDirEntry :: Vol -> [W8] -> Dir -> M ()
-writeDirEntry vol bytes = \case
-  Root -> writeRootDirEntry vol bytes
-  Sub cn -> writeSubDirEntry vol bytes cn
+writeDirEntry :: Vol -> String -> StandardEntry -> Dir -> M ()
+writeDirEntry vol longName entry dir = do
+  let bytes = encodeEntry longName entry
+  let size = 2 + ((length longName - 1) `div` 13)
+  (dir,addr) <- findDirNextEntry vol size dir
+  writeDirEntryBytesAddr vol bytes addr dir
 
-writeRootDirEntry :: Vol -> [W8] -> M ()
-writeRootDirEntry vol bytes = do
-  (si,so) <- findRootDirNextEntry vol
+writeDirEntryBytesAddr :: Vol -> [W8] -> Addr -> Dir -> M ()
+writeDirEntryBytesAddr vol bytes addr = \case
+  Root -> writeRootDirEntryBytesAddr bytes addr
+  Sub cn -> writeSubDirEntryBytesAddr vol bytes cn addr
+
+writeRootDirEntryBytesAddr :: [W8] -> Addr -> M ()
+writeRootDirEntryBytesAddr bytes (si,so) = do
   let remainingSpaceInSector = sectorSize - fi so
   if (length bytes <= remainingSpaceInSector) then writeSectorBytes si so bytes else do
     let (front,rest) = splitAt remainingSpaceInSector bytes
@@ -261,22 +264,8 @@ writeRootDirEntry vol bytes = do
     writeSectorBytes si so front
     writeSectorBytes (si+1) 0 rest
 
-findRootDirNextEntry :: Vol -> M (SectorIndex,SectorOffset)
-findRootDirNextEntry VolumeInfo{rootDirBegin} = loop rootDirBegin 0
-  where
-    loop :: SectorIndex -> SectorOffset -> M (SectorIndex,SectorOffset)
-    loop si so = if
-      | fi so >= sectorSize -> do
-          loop (si+1) 0
-      | otherwise -> do
-          DirRecord{kind} <- getDirRecord "" si so
-          case kind of
-            DRK_EndOfDir -> pure (si,so)
-            _ -> loop si (so + fi bytesPerDirEntry)
-
-writeSubDirEntry :: Vol -> [W8] -> CN -> M ()
-writeSubDirEntry vol bytes cn = do
-  (cn,si,so) <- findSubDirNextEntry vol cn -- we might already be in a differennt cluster
+writeSubDirEntryBytesAddr :: Vol -> [W8] -> CN -> Addr -> M ()
+writeSubDirEntryBytesAddr vol bytes cn (si,so) = do
   let remainingSpaceInSector = sectorSize - fi so
   if (length bytes <= remainingSpaceInSector) then writeSectorBytes si so bytes else do
     let (front,rest) = splitAt remainingSpaceInSector bytes
@@ -287,29 +276,9 @@ writeSubDirEntry vol bytes cn = do
     let si' = siFromClusterNumber vol cn'
     writeSectorBytes si' 0 rest
 
-findSubDirNextEntry :: Vol -> CN -> M (CN,SectorIndex,SectorOffset)
-findSubDirNextEntry vol cn = loop cn (siFromClusterNumber vol cn) 0
-  where
-    loop :: CN -> SectorIndex -> SectorOffset -> M (CN,SectorIndex,SectorOffset)
-    loop cn si so = if
-      | fi so >= sectorSize -> do
-          cn' <- nextCluster vol cn
-          let si' = siFromClusterNumber vol cn'
-          loop cn' si' 0
-      | otherwise -> do
-          DirRecord{kind} <- getDirRecord "" si so
-          case kind of
-            DRK_EndOfDir -> pure (cn,si,so)
-            _ -> loop cn si (so + fi bytesPerDirEntry)
 
 nextCluster :: Vol -> CN -> M CN
 nextCluster vol cn = do
-  cn' <- nextCluster1 vol cn
-  --_see ("nextCluser",cn,"->",cn')
-  pure cn'
-
-nextCluster1 :: Vol -> CN -> M CN
-nextCluster1 vol cn = do
   cn' <- stepFatChain vol cn
   if
     | cn' /= 0xffff -> do
@@ -319,6 +288,52 @@ nextCluster1 vol cn = do
         --let cn' = 1 + cn'0
         setNextCluser vol cn (fi cn')
         pure cn'
+
+findDirNextEntry :: Vol -> Int -> Dir -> M (Dir,Addr)
+findDirNextEntry vol size = \case
+  Root -> do
+    addr <- findRootDirNextEntry vol size
+    pure (Root,addr)
+  Sub cn -> do
+    (cn,addr) <- findSubDirNextEntry vol size cn
+    pure (Sub cn, addr)
+
+findRootDirNextEntry :: Vol -> Int -> M Addr
+findRootDirNextEntry VolumeInfo{rootDirBegin} size = loop0 (rootDirBegin,0)
+  where
+    loop0 :: Addr -> M Addr
+    loop0 addr = loop size addr addr
+
+    loop :: Int -> Addr -> Addr -> M Addr
+    loop need candidateAddr (si,so) = if
+      | fi so >= sectorSize -> do
+          loop need candidateAddr (si+1, 0)
+      | otherwise -> do
+          DirRecord{kind} <- getDirRecord "" si so
+          case kind of
+            DRK_EndOfDir -> pure candidateAddr
+            DRK_Unused -> do
+              if need == 1
+                then pure candidateAddr
+                else loop (need-1) candidateAddr (si, so + fi bytesPerDirEntry)
+            _ ->
+              loop0 (si, so + fi bytesPerDirEntry)
+
+findSubDirNextEntry :: Vol -> Int -> CN -> M (CN,Addr)
+findSubDirNextEntry vol _size cn = loop cn (siFromClusterNumber vol cn) 0
+  where
+    loop :: CN -> SectorIndex -> SectorOffset -> M (CN,Addr)
+    loop cn si so = if
+      | fi so >= sectorSize -> do
+          cn' <- nextCluster vol cn
+          let si' = siFromClusterNumber vol cn'
+          loop cn' si' 0
+      | otherwise -> do
+          DirRecord{kind} <- getDirRecord "" si so
+          case kind of
+            DRK_EndOfDir -> pure (cn,(si,so))
+            _ -> loop cn si (so + fi bytesPerDirEntry)
+
 
 ----------------------------------------------------------------------
 -- DIRECTORY encode
@@ -530,7 +545,7 @@ stepFatChain vol cn = do
   -- _see("stepFatChain",cn,(si,so),"-->",cn')
   pure cn'
 
-cn2sio :: Vol -> CN -> M (SectorIndex,SectorOffset)
+cn2sio :: Vol -> CN -> M Addr
 cn2sio vol cn = do
   let VolumeInfo{fatBegin} = vol
   let bytePerChainWord :: Int = 2

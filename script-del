@@ -6,4 +6,5 @@ cp /home/nic/code/minimal/README.md minimal
 echo 333 > zzz
 rm minimal
 
-echo 444 > name-over-13-long
+echo 444 > abcdefghijk234
+echo 555 > short
