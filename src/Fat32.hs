@@ -21,7 +21,7 @@ decode1 off = do
 getTree :: VolumeInfo -> M Tree
 getTree vol@VolumeInfo{rootDirFirstCluster=cn0} = deepTree cn0
   where
-    deepTree :: W32 -> M Tree
+    deepTree :: CN -> M Tree
     deepTree cn = do
       rs <- getDirInfo vol cn
       binds <- sequence [ do entry <- deepEntry r; pure (shortName,entry)
@@ -46,11 +46,12 @@ data VolumeInfo = VolumeInfo
   , numberReservedSectors :: W16
   , numberOfFats :: W8
   , sectorsPerFat :: W32
-  , rootDirFirstCluster :: W32 -- TODO: newtype for ClusterNumber?
+  , rootDirFirstCluster :: CN
   , sig :: W16
   , fatBegin :: W32
   , clusterBegin :: W32
   } deriving Show
+
 
 getVolumeInfo :: W32 -> M VolumeInfo
 getVolumeInfo off = do
@@ -59,7 +60,7 @@ getVolumeInfo off = do
   numberReservedSectors <- get16 (off+0xE)
   numberOfFats <- get8 (off+0x10)
   sectorsPerFat <- get32 (off+0x24)
-  rootDirFirstCluster <- get32 (off+0x2C)
+  rootDirFirstCluster <- CN <$> get32 (off+0x2C)
   sig <- get16 (off+0x1FE)
 
   assert (bytesPerSector == 512) $ do
@@ -82,10 +83,10 @@ getVolumeInfo off = do
                   , clusterBegin
                   }
 
-getDirInfo :: VolumeInfo -> W32 -> M [DirRecord]
+getDirInfo :: VolumeInfo -> CN -> M [DirRecord]
 getDirInfo vol cn = loop cn 0
   where
-    loop :: W32 -> Int -> M [DirRecord]
+    loop :: CN -> Int -> M [DirRecord]
     loop cn i = if
       | i > 15 -> do
           cn' <- stepFatChain vol cn
@@ -113,7 +114,7 @@ getDirRecord o = do
       | otherwise -> DRK_Normal
   firstClusterHi <- get16 (o+0x14)
   firstClusterLo <- get16 (o+0x1A)
-  let firstCluster = mk32 HL {hi = firstClusterHi, lo = firstClusterLo}
+  let firstCluster = CN $ mk32 HL {hi = firstClusterHi, lo = firstClusterLo}
   fileSize <- get32 (o+0x1C)
   shortName <- map toChar <$> getBytes o 11
   let isDir = (attr .&. 0x10) /= 0
@@ -125,7 +126,7 @@ getFileContents vol dr = do
   let DirRecord{fileSize,firstCluster} = dr
   let bps = fromIntegral bytesPerSector
   let
-    loop :: W32 -> Int -> M String
+    loop :: CN -> Int -> M String
     loop cn size = if
       | size <= bps -> do
           let off = offsetFromClusterNumber vol cn
@@ -138,18 +139,18 @@ getFileContents vol dr = do
           pure (start ++ rest)
   loop firstCluster (fromIntegral fileSize)
 
-stepFatChain ::VolumeInfo -> W32 -> M W32
+stepFatChain ::VolumeInfo -> CN -> M CN
 stepFatChain vol cn = do
   let VolumeInfo{fatBegin,bytesPerSector} = vol
-  let off = fatBegin * fromIntegral bytesPerSector + 4 * cn
-  cn' <- get32 off
+  let off = fatBegin * fromIntegral bytesPerSector + 4 * fromIntegral cn
+  cn' <- CN <$> get32 off
   --Print ("stepFatChain",cn,"-->",cn')
   pure cn'
 
-offsetFromClusterNumber :: VolumeInfo -> W32 -> W32
-offsetFromClusterNumber vol n = do
+offsetFromClusterNumber :: VolumeInfo -> CN -> W32
+offsetFromClusterNumber vol cn = do
   let VolumeInfo{clusterBegin,bytesPerSector,sectorsPerCluster} = vol
-  let lba_addr = clusterBegin + (n - 2) * fromIntegral sectorsPerCluster
+  let lba_addr = clusterBegin + (fromIntegral cn - 2) * fromIntegral sectorsPerCluster
   fromIntegral bytesPerSector * fromIntegral sectorsPerCluster * fromIntegral lba_addr
 
 toChar :: W8 -> Char
@@ -158,11 +159,14 @@ toChar (W8 w) = w2c w
 data DirRecord = DirRecord
   { kind :: DirRecordKind
   , attr :: W8
-  , firstCluster :: W32
+  , firstCluster :: CN
   , fileSize :: W32
   , shortName :: String
   , isDir :: Bool
   } deriving Show
+
+-- Cluster Number
+newtype CN = CN W32 deriving (Num,Integral,Real,Enum,Ord,Eq,Show)
 
 data DirRecordKind = DRK_Normal | DRK_Long | DRK_Unused | DRK_EndOfDir
   deriving (Show,Eq)
