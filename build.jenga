@@ -2,5 +2,13 @@
 fat.image: make-image.sh
   ./make-image.sh $out 2>/dev/null >/dev/null
 
-*top: src/fat.exe fat.image
-  ./$in
+# *top: src/fat.exe fat.image
+#   ./$in
+
+
+example1.out : src/fat.exe fat.image
+  ./$in1 $in2 > $out
+
+expect.names : : echo 'example1.out' > $out
+
+include ~/code/jenga/rulelib/expect.jenga
