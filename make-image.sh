@@ -1,15 +1,17 @@
-#!/bin/bash
+#!/bin/bash -v
 
 # Make a sample filesystem image to decode
+
+width=$1
+result=$2
 
 image=/tmp/fat.image
 fs=/mnt/play
 
-dd if=/dev/zero of=$image bs=512 count=1000
-/sbin/mkfs.vfat -F 32 $image
+dd if=/dev/zero of=$image bs=512 count=20000
+/sbin/mkfs.vfat -s 1 -F $width $image
 file $image
 
-#umount $fs
 mount $fs
 (
 cd $fs
@@ -29,7 +31,7 @@ echo -n 'x' > single
 echo '0123456789' > numbers.txt
 echo 'abcdefghijklmnopqrstuvwxyz' > letters
 
-#echo -n 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' > a
+echo -n 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' > a
 echo 'x' > b
 echo 'x' > c
 
@@ -45,11 +47,10 @@ echo 'x' > e
 #cat /usr/share/dict/words | head -150 > words
 
 echo 'AAAAAAAAAAAAAAAAAAA-LAST' >> a
-
 )
 
 
 sleep 0
 umount $fs
 
-cp $image $1
+cp $image $result

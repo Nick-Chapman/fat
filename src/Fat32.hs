@@ -10,11 +10,11 @@ import FileTree (Tree(..),Entry(..))
 import Text.Printf (printf)
 
 decode :: FilePath -> IO Tree
-decode path = exec (decode1 0) path
+decode path = exec decoder path
 
-decode1 :: W32 -> M Tree
-decode1 off = do
-  vol <- getVolumeInfo off
+decoder :: M Tree
+decoder = do
+  vol <- getVolumeInfo 0
   --Print vol
   getTree vol
 
@@ -54,7 +54,8 @@ data VolumeInfo = VolumeInfo
 
 
 getVolumeInfo :: W32 -> M VolumeInfo
-getVolumeInfo off = do
+getVolumeInfo offSector = do -- this is currently always 0
+  let off = 512 * offSector
   bytesPerSector <- get16 (off+0xB)
   sectorsPerCluster <- get8 (off+0xD)
   numberReservedSectors <- get16 (off+0xE)
@@ -69,8 +70,8 @@ getVolumeInfo off = do
   assert (numberReservedSectors == 32) $ do
   assert (sig == 0xAA55) $ do
 
-  let fatBegin = off + fromIntegral numberReservedSectors
-  let clusterBegin = off + fromIntegral numberReservedSectors + (fromIntegral numberOfFats * sectorsPerFat)
+  let fatBegin = offSector + fromIntegral numberReservedSectors
+  let clusterBegin = offSector + fromIntegral numberReservedSectors + (fromIntegral numberOfFats * sectorsPerFat)
 
   pure VolumeInfo { bytesPerSector
                   , sectorsPerCluster

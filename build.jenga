@@ -1,14 +1,25 @@
 
-fat.image: make-image.sh
-  ./make-image.sh $out 2>/dev/null >/dev/null
+fat16.image: make-image.sh
+  ./make-image.sh 16 $out 2>/dev/null >/dev/null
 
-*top: src/fat.exe fat.image
-  ./$in1 $in2
+fat32.image: make-image.sh
+  ./make-image.sh 32 $out 2>/dev/null >/dev/null
+
+*top16: src/fat.exe fat16.image
+  ./$in1 -16 $in2
+
+*top32: src/fat.exe fat32.image
+  ./$in1 -32 $in2
 
 
-example1.out : src/fat.exe fat.image
-  ./$in1 $in2 > $out
+example16.out : src/fat.exe fat16.image
+  ./$in1 -16 $in2 > $out
 
-expect.names : : echo 'example1.out' > $out
+example32.out : src/fat.exe fat32.image
+  ./$in1 -32 $in2 > $out
+
+expect.names :
+  echo example16.out >> $out
+  echo example32.out >> $out
 
 include ~/code/jenga/rulelib/expect.jenga
