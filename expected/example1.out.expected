@@ -1,17 +1,12 @@
-#11
-  ("FIRST      ",File 9 "contents\n")
-  ("ZERO       ",File 0 "")
-  ("SINGLE     ",File 1 "x")
-  ("NUMBERS TXT",File 11 "0123456789\n")
-  ("LETTERS    ",File 27 "abcdefghijklmnopqrstuvwxyz\n")
-  ("B          ",File 2 "x\n")
-  ("C          ",File 2 "x\n")
-  ("SUB        ","DIR")
-    #2
-      ("THING      ",File 8 "subfile\n")
-      ("SUB2       ","DIR")
-        #1
-          ("DEEP       ",File 9 "sub2file\n")
-  ("D          ",File 2 "x\n")
-  ("E          ",File 2 "x\n")
-  ("A          ",File 25 "AAAAAAAAAAAAAAAAAAA-LAST\n")
+/FIRST : "contents\n"
+/ZERO : ""
+/SINGLE : "x"
+/NUMBERS TXT : "0123456789\n"
+/LETTERS : "abcdefghijklmnopqrstuvwxyz\n"
+/B : "x\n"
+/C : "x\n"
+/SUB/THING : "subfile\n"
+/SUB/SUB2/DEEP : "sub2file\n"
+/D : "x\n"
+/E : "x\n"
+/A : "AAAAAAAAAAAAAAAAAAA-LAST\n"

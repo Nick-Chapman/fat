@@ -2,8 +2,8 @@
 fat.image: make-image.sh
   ./make-image.sh $out 2>/dev/null >/dev/null
 
-# *top: src/fat.exe fat.image
-#   ./$in
+*top: src/fat.exe fat.image
+  ./$in1 $in2
 
 
 example1.out : src/fat.exe fat.image
