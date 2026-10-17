@@ -6,8 +6,7 @@ import Text.Printf (printf)
 import Data.ByteString qualified as B
 import Data.ByteString.Internal (w2c)
 import Data.Bits (Bits,(.&.))
-
-import FileTree (Tree(..),Entry(..),File(..))
+import FileTree (Tree(..),Entry(..))
 
 decode :: FilePath -> IO Tree
 decode path = exec (decode1 0) path
@@ -32,13 +31,13 @@ getTree vol@VolumeInfo{rootDirFirstCluster=cn0} = deepTree cn0
       pure (Tree binds)
 
     deepEntry :: DirRecord -> M Entry
-    deepEntry r@DirRecord{fileSize,isDir,firstCluster=cn} = if
+    deepEntry r@DirRecord{isDir,firstCluster=cn} = if
       | isDir -> do
           tree <- deepTree cn
           pure (ETree tree)
       | otherwise -> do
           contents <- getFileContents vol r
-          pure (EFile (File (fromIntegral fileSize) contents))
+          pure (EFile contents)
 
 data VolumeInfo = VolumeInfo
   { bytesPerSector :: W16

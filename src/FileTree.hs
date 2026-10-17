@@ -1,14 +1,13 @@
 
 module FileTree
-  ( Tree(..), Entry(..), File(..)
+  ( Tree(..), Entry(..)
   , printTree
   ) where
 
 import Text.Printf (printf)
 
 data Tree = Tree [(String,Entry)] deriving Show
-data Entry = EFile File | ETree Tree deriving Show
-data File = File Int String deriving Show -- TODO: kill Int; kill type
+data Entry = EFile String | ETree Tree deriving Show
 
 printTree :: Tree -> IO ()
 printTree root = walkTree "" root
@@ -22,7 +21,7 @@ printTree root = walkTree "" root
     walkEntry prefix (basename,entry) = do
       let fullname = prefix ++ "/" ++ trim basename
       case entry of
-        EFile (File _ contents) ->
+        EFile contents ->
           putStrLn (printf "%s : %s" fullname (show contents))
         ETree t -> do
           walkTree fullname t
