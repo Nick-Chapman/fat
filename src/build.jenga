@@ -14,7 +14,7 @@ ghc-options:
   echo -Werror >> $out
   echo -Wall >> $out
   echo -Wno-name-shadowing >> $out
-  echo -O >> $out
+  #echo -O >> $out # prevents assertions
 
 default-extensions:
   echo LambdaCase >> $out
@@ -23,6 +23,7 @@ default-extensions:
   echo MultiWayIf >> $out
   echo RecordWildCards >> $out
   # echo Strict >> $out
+  echo NondecreasingIndentation >> $out
 
 packages:
-  echo bytestring >> $@
+  echo bytestring >> $out

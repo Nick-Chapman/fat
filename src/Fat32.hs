@@ -1,12 +1,13 @@
 module Fat32 (decode) where
 
-import Data.Word (Word8,Word16,Word32)
+import Control.Exception (assert)
 import Control.Monad (ap,liftM)
-import Text.Printf (printf)
+import Data.Bits (Bits,(.&.))
 import Data.ByteString qualified as B
 import Data.ByteString.Internal (w2c)
-import Data.Bits (Bits,(.&.))
+import Data.Word (Word8,Word16,Word32)
 import FileTree (Tree(..),Entry(..))
+import Text.Printf (printf)
 
 decode :: FilePath -> IO Tree
 decode path = exec (decode1 0) path
@@ -60,9 +61,16 @@ getVolumeInfo off = do
   sectorsPerFat <- get32 (off+0x24)
   rootDirFirstCluster <- get32 (off+0x2C)
   sig <- get16 (off+0x1FE)
+
+  assert (bytesPerSector == 512) $ do
+  assert (sectorsPerCluster == 1) $ do
+  assert (numberOfFats == 2) $ do
+  assert (numberReservedSectors == 32) $ do
+  assert (sig == 0xAA55) $ do
+
   let fatBegin = off + fromIntegral numberReservedSectors
   let clusterBegin = off + fromIntegral numberReservedSectors + (fromIntegral numberOfFats * sectorsPerFat)
-  -- TODO: assert some expected values
+
   pure VolumeInfo { bytesPerSector
                   , sectorsPerCluster
                   , numberReservedSectors

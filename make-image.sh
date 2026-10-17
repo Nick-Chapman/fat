@@ -5,7 +5,7 @@
 image=/tmp/fat.image
 fs=/mnt/play
 
-dd if=/dev/zero of=$image bs=512 count=100
+dd if=/dev/zero of=$image bs=512 count=1000
 /sbin/mkfs.vfat -F 32 $image
 file $image
 
