@@ -9,12 +9,21 @@ import Data.Word (Word8,Word16,Word32)
 import FileTree (Tree(..),Entry(..))
 import Text.Printf (printf)
 
+fi :: (Integral a, Num b) => a -> b
+fi x = fromIntegral x
+
+sectorSize :: Int
+sectorSize = 512
+
+bytesPerDirEntry :: Int
+bytesPerDirEntry = 32
+
 decode :: FilePath -> IO Tree
 decode path = exec decoder path
 
 decoder :: M Tree
 decoder = do
-  vol <- getVolumeInfo 0
+  vol <- getVolumeInfo (SectorIndex 0)
   --Print vol
   getTree vol
 
@@ -46,48 +55,45 @@ getTree vol = do
           pure (EFile contents)
 
 data VolumeInfo = VolumeInfo
-  { bytesPerSector :: W16
-  , sectorsPerCluster :: W8
+  { sectorsPerCluster :: W8
   , numberReservedSectors :: W16
   , numberOfFats :: W8
   , numberOfRootEntries :: W16
   , sectorsPerFat :: W16
   , sig :: W16
   , sectorsForRootDir :: W16
-  , fatBegin :: W16
-  , rootDirBegin :: W16
-  , clusterBegin :: W16
+  , fatBegin :: SectorIndex
+  , rootDirBegin :: SectorIndex
+  , clusterBegin :: SectorIndex
   } deriving Show
 
 
-getVolumeInfo :: W16 -> M VolumeInfo
-getVolumeInfo offSector = do
-  let off = 512 * fromIntegral offSector
-  bytesPerSector <- get16 (off+0xB)
-  sectorsPerCluster <- get8 (off+0xD)
-  numberReservedSectors <- get16 (off+0xE)
-  numberOfFats <- get8 (off+0x10)
-  numberOfRootEntries <- get16 (off+0x11)
-  sectorsPerFat <- get16 (off+0x16)
-  sig <- get16 (off+0x1FE)
+getVolumeInfo :: SectorIndex -> M VolumeInfo
+getVolumeInfo si = do
+  bytesPerSector <- get16 si 0xB
+  sectorsPerCluster <- get8 si 0xD
+  numberReservedSectors <- get16 si 0xE
+  numberOfFats <- get8 si 0x10
+  numberOfRootEntries <- get16 si 0x11
+  sectorsPerFat <- get16 si 0x16
+  sig <- get16 si 0x1FE
 
-  assert (bytesPerSector == 512) $ do
+  assert (fi bytesPerSector == sectorSize) $ do
   assert (sectorsPerCluster == 1) $ do
   assert (numberOfFats == 2) $ do
   assert (numberReservedSectors == 1) $ do
   assert (sig == 0xAA55) $ do
 
-  let numberOfDirEntriesPerSector = bytesPerSector `div` fromIntegral bytesPerDirEntry
+  let numberOfDirEntriesPerSector = fi (sectorSize `div` bytesPerDirEntry)
   assert (numberOfDirEntriesPerSector == 16) $ do
   assert (numberOfRootEntries `mod` numberOfDirEntriesPerSector == 0) $ do
   let sectorsForRootDir = numberOfRootEntries `div` numberOfDirEntriesPerSector
 
-  let fatBegin = offSector + numberReservedSectors
-  let rootDirBegin = fatBegin + sectorsPerFat * fromIntegral numberOfFats
-  let clusterBegin = rootDirBegin + sectorsForRootDir
+  let fatBegin = si + fi numberReservedSectors
+  let rootDirBegin = fatBegin + fi sectorsPerFat * fi numberOfFats
+  let clusterBegin = rootDirBegin + fi sectorsForRootDir
 
-  pure VolumeInfo { bytesPerSector
-                  , sectorsPerCluster
+  pure VolumeInfo { sectorsPerCluster
                   , numberReservedSectors
                   , numberOfFats
                   , numberOfRootEntries
@@ -100,38 +106,35 @@ getVolumeInfo offSector = do
                   }
 
 getRootDirInfo :: VolumeInfo -> M [DirRecord]
-getRootDirInfo vol@VolumeInfo{rootDirBegin=sn} = loop sn 0
+getRootDirInfo VolumeInfo{rootDirBegin} = loop rootDirBegin 0
   where
-    loop :: W16 -> Int -> M [DirRecord]
-    loop sn i = if
-      | i > 15 -> do
-            loop (sn+1) 0
+    loop :: SectorIndex -> Int -> M [DirRecord]
+    loop si i = if
+      | i >= 16 -> do
+          loop (si+1) 0
       | otherwise -> do
-          let VolumeInfo{bytesPerSector} = vol
-          let off = fromIntegral bytesPerSector * fromIntegral sn
-          dr@DirRecord{kind} <- getDirRecord (off + fromIntegral bytesPerDirEntry * fromIntegral i)
+          let so = fi bytesPerDirEntry * fi i
+          dr@DirRecord{kind} <- getDirRecord si so
           case kind of
             DRK_EndOfDir -> pure []
-            DRK_Unused -> loop sn (i+1)
-            DRK_Long -> loop sn (i+1)
+            DRK_Unused -> loop si (i+1)
+            DRK_Long -> loop si (i+1)
             DRK_Normal -> do
-              drs <- loop sn (i+1)
+              drs <- loop si (i+1)
               pure (dr:drs)
-
-bytesPerDirEntry :: Int
-bytesPerDirEntry = 32
 
 getDirInfo :: VolumeInfo -> CN -> M [DirRecord]
 getDirInfo vol cn = loop cn 0
   where
     loop :: CN -> Int -> M [DirRecord]
     loop cn i = if
-      | i > 15 -> do
+      | i >= 16 -> do
           cn' <- stepFatChain vol cn
           loop cn' 0
       | otherwise -> do
-          let off = offsetFromClusterNumber vol cn
-          dr@DirRecord{kind} <- getDirRecord (off + 32 * fromIntegral i)
+          let si = siFromClusterNumber vol cn
+          let so = fi (bytesPerDirEntry * i)
+          dr@DirRecord{kind} <- getDirRecord si so
           case kind of
             DRK_EndOfDir -> pure []
             DRK_Unused -> loop cn (i+1)
@@ -140,55 +143,54 @@ getDirInfo vol cn = loop cn 0
               drs <- loop cn (i+1)
               pure (dr:drs)
 
-getDirRecord :: W32 -> M DirRecord
-getDirRecord o = do
-  firstByte <- get8 o
-  attr <- get8 (o+0xB)
+getDirRecord :: SectorIndex -> SectorOffset -> M DirRecord
+getDirRecord si so = do
+  firstByte <- get8 si so
+  attr <- get8 si (so+0xB)
   let
     kind = if
       | firstByte == 0x00 -> DRK_EndOfDir
       | firstByte == 0xE5 -> DRK_Unused
       | (attr .&. 0xF) == 0xF -> DRK_Long
       | otherwise -> DRK_Normal
-  firstCluster <- CN <$> get16 (o+0x1A)
-  fileSize <- get32 (o+0x1C)
-  shortName <- map toChar <$> getBytes o 11
+  firstCluster <- CN <$> get16 si (so + 0x1A)
+  fileSize <- get32 si (so + 0x1C)
+  shortName <- map toChar <$> getBytes si so 11
   let isDir = (attr .&. 0x10) /= 0
   pure DirRecord { kind,attr,firstCluster,fileSize,shortName,isDir }
 
 getFileContents :: VolumeInfo -> DirRecord -> M String
 getFileContents vol dr = do
-  let VolumeInfo{bytesPerSector} = vol
   let DirRecord{fileSize,firstCluster} = dr
-  let bps = fromIntegral bytesPerSector
   let
     loop :: CN -> Int -> M String
     loop cn size = if
-      | size <= bps -> do
-          let off = offsetFromClusterNumber vol cn
-          map toChar <$> getBytes off (fromIntegral size)
+      | size <= sectorSize -> do
+          let si = siFromClusterNumber vol cn
+          map toChar <$> getBytes si 0 (fi size)
       | otherwise -> do
-          let off = offsetFromClusterNumber vol cn
-          start <- map toChar <$> getBytes off bps
+          let si = siFromClusterNumber vol cn
+          start <- map toChar <$> getBytes si 0 sectorSize
           cn' <- stepFatChain vol cn
-          rest <- loop cn' (size - bps)
+          rest <- loop cn' (size - sectorSize)
           pure (start ++ rest)
-  loop firstCluster (fromIntegral fileSize)
+  loop firstCluster (fi fileSize)
 
 stepFatChain ::VolumeInfo -> CN -> M CN
 stepFatChain vol cn = do
-  let VolumeInfo{fatBegin,bytesPerSector} = vol
-  let bytePerChainWord = 2
-  let off = fromIntegral fatBegin * fromIntegral bytesPerSector + bytePerChainWord * fromIntegral cn
-  cn' <- CN <$> get16 off
+  let VolumeInfo{fatBegin} = vol
+  let bytePerChainWord :: Int = 2
+  let n = bytePerChainWord * fi cn
+  let si = fi (n `div` sectorSize) + fatBegin
+  let so = fi (n `mod` sectorSize)
+  cn' <- CN <$> get16 si so
   --Print ("stepFatChain",cn,"-->",cn')
   pure cn'
 
-offsetFromClusterNumber :: VolumeInfo -> CN -> W32
-offsetFromClusterNumber vol cn = do
-  let VolumeInfo{bytesPerSector,sectorsPerCluster,clusterBegin} = vol
-  let lba_addr = clusterBegin + (fromIntegral cn - 2) * fromIntegral sectorsPerCluster
-  fromIntegral bytesPerSector * fromIntegral sectorsPerCluster * fromIntegral lba_addr
+siFromClusterNumber :: VolumeInfo -> CN -> SectorIndex
+siFromClusterNumber vol cn = do
+  let VolumeInfo{sectorsPerCluster,clusterBegin} = vol
+  clusterBegin + (fi cn - 2) * fi sectorsPerCluster
 
 toChar :: W8 -> Char
 toChar (W8 w) = w2c w
@@ -208,23 +210,26 @@ newtype CN = CN W16 deriving (Num,Integral,Real,Enum,Ord,Eq,Show)
 data DirRecordKind = DRK_Normal | DRK_Long | DRK_Unused | DRK_EndOfDir
   deriving (Show,Eq)
 
-getBytes :: W32 -> Int -> M [W8]
-getBytes off n = sequence [ GetW8 (off + fromIntegral i) | i <- [0.. n-1] ]
+getBytes :: SectorIndex -> SectorOffset -> Int -> M [W8]
+getBytes si so n = sequence [ get8 si (so + fi i) | i <- [0.. n-1] ]
 
-get32 :: W32 -> M W32
-get32 o = do
-  lo <- get16 o
-  hi <- get16 (o+2)
+get32 :: SectorIndex -> SectorOffset -> M W32
+get32 si so = do
+  lo <- get16 si so
+  hi <- get16 si (so+2)
   pure (mk32 HL {hi,lo})
 
-get16 :: W32 -> M W16
-get16 o = do
-  lo <- get8 o
-  hi <- get8 (o+1)
+get16 :: SectorIndex -> SectorOffset -> M W16
+get16 si so = do
+  lo <- get8 si so
+  hi <- get8 si (so+1)
   pure (mk16 HL{hi,lo})
 
-get8 :: W32 -> M W8
-get8 = GetW8
+get8 :: SectorIndex -> SectorOffset -> M W8
+get8 si so = do
+  sec <- ReadSector si
+  let byte = readInSector sec so
+  pure byte
 
 instance Functor M where fmap = liftM
 instance Applicative M where pure = Pure; (<*>) = ap
@@ -233,27 +238,28 @@ instance Monad M where (>>=) = Bind
 data M a where
   Pure :: a -> M a
   Bind :: M a -> (a -> M b) -> M b
-  GetW8 :: W32 -> M W8 -- TODO: reading a whole sector should be the prim-op
+  ReadSector :: SectorIndex -> M Sector
   Print :: Show a => a -> M ()
 
 exec :: M a -> FilePath -> IO a
 exec m0 path = do
-  the_bs <- B.readFile path
+  theBS <- B.readFile path
   let
-    lookup :: W32 -> W8
-    lookup off = W8 (B.head (B.drop (fromIntegral off) the_bs))
     go :: M a -> IO a
     go = \case
       Pure x -> pure x
       Bind m f -> do a <- go m; go (f a)
-      GetW8 off -> pure (lookup off)
       Print x ->  print x
+      ReadSector (SectorIndex n) -> do
+        pure (Sector (B.drop (sectorSize * fi n) theBS))
   go m0
 
-newtype W8 = W8 Word8 deriving (Num,Integral,Real,Enum,Ord,Eq,Bits)
+newtype W8 = W8 Word8
+  deriving (Num,Integral,Real,Enum,Ord,Eq,Bits)
 instance Show W8 where show (W8 w) = printf "$%02x" w
 
-newtype W16 = W16 Word16 deriving (Num,Integral,Real,Enum,Ord,Eq)
+newtype W16 = W16 Word16
+  deriving (Num,Integral,Real,Enum,Ord,Eq,Bits)
 instance Show W16 where show (W16 w) = printf "$%04x" w
 
 newtype W32 = W32 Word32 deriving (Num,Integral,Real,Enum,Ord,Eq)
@@ -262,7 +268,18 @@ instance Show W32 where show (W32 w) = printf "$%08x" w
 data HL a = HL { hi :: a, lo :: a }
 
 mk32 :: HL W16 -> W32
-mk32 HL{hi,lo} = W32 (fromIntegral hi * (256*256) + fromIntegral lo)
+mk32 HL{hi,lo} = W32 (fi hi * (256*256) + fi lo)
 
 mk16 :: HL W8 -> W16
-mk16 HL{hi,lo} = W16 (fromIntegral hi * 256 + fromIntegral lo)
+mk16 HL{hi,lo} = W16 (fi hi * 256 + fi lo)
+
+newtype SectorIndex = SectorIndex W16
+  deriving (Num,Integral,Real,Enum,Ord,Eq,Bits,Show)
+
+newtype SectorOffset = SectorOffset W16 -- actually only need 9 bits
+  deriving (Num,Integral,Real,Enum,Ord,Eq,Bits,Show)
+
+newtype Sector = Sector B.ByteString
+
+readInSector :: Sector -> SectorOffset -> W8
+readInSector (Sector bs) (SectorOffset n) = W8 $ B.head (B.drop (fi n) bs)
