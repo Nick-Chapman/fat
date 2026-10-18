@@ -79,9 +79,9 @@ getVolumeInfo si = do
   sig <- get16 si 0x1FE
 
   assert (fi bytesPerSector == sectorSize) $ do
-  assert (sectorsPerCluster == 1) $ do
+  --assert (sectorsPerCluster == 1) $ do
   assert (numberOfFats == 2) $ do
-  assert (numberReservedSectors == 1) $ do
+  --assert (numberReservedSectors == 1) $ do
   assert (sig == 0xAA55) $ do
 
   let numberOfDirEntriesPerSector = fi (sectorSize `div` bytesPerDirEntry)
@@ -128,7 +128,7 @@ getDirInfo vol cn = loop cn 0
   where
     loop :: CN -> Int -> M [DirRecord]
     loop cn i = if
-      | i >= 16 -> do
+      | i >= 16 -> do -- TODO: sectorsPerCluster
           cn' <- stepFatChain vol cn
           loop cn' 0
       | otherwise -> do
@@ -161,18 +161,20 @@ getDirRecord si so = do
 
 getFileContents :: VolumeInfo -> DirRecord -> M String
 getFileContents vol dr = do
+  let VolumeInfo{sectorsPerCluster} = vol
   let DirRecord{fileSize,firstCluster} = dr
+  let clusterSize = sectorSize * fi sectorsPerCluster
   let
     loop :: CN -> Int -> M String
     loop cn size = if
-      | size <= sectorSize -> do
+      | size <= clusterSize -> do
           let si = siFromClusterNumber vol cn
           map toChar <$> getBytes si 0 (fi size)
       | otherwise -> do
           let si = siFromClusterNumber vol cn
-          start <- map toChar <$> getBytes si 0 sectorSize
+          start <- map toChar <$> getBytes si 0 clusterSize
           cn' <- stepFatChain vol cn
-          rest <- loop cn' (size - sectorSize)
+          rest <- loop cn' (size - clusterSize)
           pure (start ++ rest)
   loop firstCluster (fi fileSize)
 

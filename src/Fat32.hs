@@ -65,7 +65,7 @@ getVolumeInfo offSector = do -- this is currently always 0
   sig <- get16 (off+0x1FE)
 
   assert (bytesPerSector == 512) $ do
-  assert (sectorsPerCluster == 1) $ do
+  --assert (sectorsPerCluster == 1) $ do
   assert (numberOfFats == 2) $ do
   assert (numberReservedSectors == 32) $ do
   assert (sig == 0xAA55) $ do
@@ -87,9 +87,11 @@ getVolumeInfo offSector = do -- this is currently always 0
 getDirInfo :: VolumeInfo -> CN -> M [DirRecord]
 getDirInfo vol cn = loop cn 0
   where
+    VolumeInfo{sectorsPerCluster} = vol
+    recordsPerCluster = 16 * fromIntegral sectorsPerCluster
     loop :: CN -> Int -> M [DirRecord]
     loop cn i = if
-      | i > 15 -> do
+      | i >= recordsPerCluster -> do
           cn' <- stepFatChain vol cn
           loop cn' 0
       | otherwise -> do
@@ -123,20 +125,20 @@ getDirRecord o = do
 
 getFileContents :: VolumeInfo -> DirRecord -> M String
 getFileContents vol dr = do
-  let VolumeInfo{bytesPerSector} = vol
+  let VolumeInfo{bytesPerSector,sectorsPerCluster} = vol
   let DirRecord{fileSize,firstCluster} = dr
-  let bps = fromIntegral bytesPerSector
+  let bpc = fromIntegral bytesPerSector * fromIntegral sectorsPerCluster
   let
     loop :: CN -> Int -> M String
     loop cn size = if
-      | size <= bps -> do
+      | size <= bpc -> do
           let off = offsetFromClusterNumber vol cn
           map toChar <$> getBytes off (fromIntegral size)
       | otherwise -> do
           let off = offsetFromClusterNumber vol cn
-          start <- map toChar <$> getBytes off bps
+          start <- map toChar <$> getBytes off bpc
           cn' <- stepFatChain vol cn
-          rest <- loop cn' (size - bps)
+          rest <- loop cn' (size - bpc)
           pure (start ++ rest)
   loop firstCluster (fromIntegral fileSize)
 
@@ -152,7 +154,7 @@ offsetFromClusterNumber :: VolumeInfo -> CN -> W32
 offsetFromClusterNumber vol cn = do
   let VolumeInfo{clusterBegin,bytesPerSector,sectorsPerCluster} = vol
   let lba_addr = clusterBegin + (fromIntegral cn - 2) * fromIntegral sectorsPerCluster
-  fromIntegral bytesPerSector * fromIntegral sectorsPerCluster * fromIntegral lba_addr
+  fromIntegral bytesPerSector * fromIntegral lba_addr
 
 toChar :: W8 -> Char
 toChar (W8 w) = w2c w
