@@ -44,6 +44,23 @@ echo 'sub2file' > sub/sub2/deep
 echo 'x' > d
 echo 'x' > e
 
+echo 'a' > sub/thing2
+echo 'b' > sub/thing3
+echo 'c' > sub/thing4
+echo 'd' > sub/thing5
+echo 'e' > sub/thing6
+echo 'f' > sub/thing7
+echo 'g' > sub/thing8
+echo 'h' > sub/thing9
+echo 'i' > sub/thing10
+echo 'j' > sub/thing11
+echo 'k' > sub/thing12
+echo 'l' > sub/thing13
+echo 'm' > sub/thing14
+echo 'n' > sub/thing15
+echo 'o' > sub/thing16
+echo 'p' > sub/thing17
+
 #cat /usr/share/dict/words | head -150 > words
 
 echo 'AAAAAAAAAAAAAAAAAAA-LAST' >> a

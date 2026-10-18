@@ -126,9 +126,11 @@ getRootDirInfo VolumeInfo{rootDirBegin} = loop rootDirBegin 0
 getDirInfo :: VolumeInfo -> CN -> M [DirRecord]
 getDirInfo vol cn = loop cn 0
   where
+    VolumeInfo{sectorsPerCluster} = vol
+    recordsPerCluster = 16 * fromIntegral sectorsPerCluster
     loop :: CN -> Int -> M [DirRecord]
     loop cn i = if
-      | i >= 16 -> do -- TODO: sectorsPerCluster
+      | i >= recordsPerCluster -> do
           cn' <- stepFatChain vol cn
           loop cn' 0
       | otherwise -> do
