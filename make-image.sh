@@ -18,6 +18,8 @@ cd $fs
 
 echo 'contents' > first
 
+echo 'q' > abc-defghijklmnopqrstuvwxyz
+
 #echo '' > 1
 #echo '' > 12345678
 #echo '' > 123456789

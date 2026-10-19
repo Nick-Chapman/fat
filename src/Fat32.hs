@@ -21,13 +21,15 @@ decoder = do
 getTree :: VolumeInfo -> M Tree
 getTree vol@VolumeInfo{rootDirFirstCluster=cn0} = deepTree cn0
   where
+    trim = reverse . dropWhile (==' ') . reverse
     deepTree :: CN -> M Tree
     deepTree cn = do
       rs <- getDirInfo vol cn
-      binds <- sequence [ do entry <- deepEntry r; pure (shortName,entry)
+      binds <- sequence [ do entry <- deepEntry r; pure (name,entry)
                         | r@DirRecord{shortName} <- rs
                         , shortName /= ".          "
                         , shortName /= "..         "
+                        , let name = trim shortName
                         ]
       pure (Tree binds)
 

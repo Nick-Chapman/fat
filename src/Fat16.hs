@@ -30,16 +30,16 @@ decoder = do
 getTree :: VolumeInfo -> M Tree
 getTree vol = do
   rs <- getRootDirInfo vol
-  binds <- sequence [ do entry <- deepEntry r; pure (shortName,entry)
-                    | r@DirRecord{shortName} <- rs
+  binds <- sequence [ do entry <- deepEntry r; pure (longName,entry)
+                    | r@DirRecord{longName} <- rs
                     ]
   pure (Tree binds)
   where
     deepTree :: CN -> M Tree
     deepTree cn = do
       rs <- getDirInfo vol cn
-      binds <- sequence [ do entry <- deepEntry r; pure (shortName,entry)
-                        | r@DirRecord{shortName} <- rs
+      binds <- sequence [ do entry <- deepEntry r; pure (longName,entry)
+                        | r@DirRecord{shortName,longName} <- rs
                         , shortName /= ".          "
                         , shortName /= "..         "
                         ]
@@ -106,47 +106,56 @@ getVolumeInfo si = do
                   }
 
 getRootDirInfo :: VolumeInfo -> M [DirRecord]
-getRootDirInfo VolumeInfo{rootDirBegin} = loop rootDirBegin 0
+getRootDirInfo VolumeInfo{rootDirBegin} = loop "" rootDirBegin 0
   where
-    loop :: SectorIndex -> Int -> M [DirRecord]
-    loop si i = if
+    loop :: String -> SectorIndex -> Int -> M [DirRecord]
+    loop suffix si i = if
       | i >= 16 -> do
-          loop (si+1) 0
+          loop suffix (si+1) 0
       | otherwise -> do
           let so = fi bytesPerDirEntry * fi i
-          dr@DirRecord{kind} <- getDirRecord si so
+          dr@DirRecord{kind} <- getDirRecord suffix si so
           case kind of
             DRK_EndOfDir -> pure []
-            DRK_Unused -> loop si (i+1)
-            DRK_Long -> loop si (i+1)
+            DRK_Unused -> loop suffix si (i+1)
+            DRK_Long -> do
+              part <- getLongNamePart si so
+              loop (part++suffix) si (i+1)
             DRK_Normal -> do
-              drs <- loop si (i+1)
+              drs <- loop "" si (i+1)
               pure (dr:drs)
 
 getDirInfo :: VolumeInfo -> CN -> M [DirRecord]
-getDirInfo vol cn = loop cn 0
+getDirInfo vol cn = loop "" cn 0
   where
     VolumeInfo{sectorsPerCluster} = vol
     recordsPerCluster = 16 * fromIntegral sectorsPerCluster
-    loop :: CN -> Int -> M [DirRecord]
-    loop cn i = if
+    loop :: String -> CN -> Int -> M [DirRecord]
+    loop suffix cn i = if
       | i >= recordsPerCluster -> do
           cn' <- stepFatChain vol cn
-          loop cn' 0
+          loop suffix cn' 0
       | otherwise -> do
           let si = siFromClusterNumber vol cn
           let so = fi (bytesPerDirEntry * i)
-          dr@DirRecord{kind} <- getDirRecord si so
+          dr@DirRecord{kind} <- getDirRecord suffix si so
           case kind of
             DRK_EndOfDir -> pure []
-            DRK_Unused -> loop cn (i+1)
-            DRK_Long -> loop cn (i+1)
+            DRK_Unused -> loop suffix cn (i+1)
+            DRK_Long -> do
+              part <- getLongNamePart si so
+              loop (part++suffix) cn (i+1)
             DRK_Normal -> do
-              drs <- loop cn (i+1)
+              drs <- loop "" cn (i+1)
               pure (dr:drs)
 
-getDirRecord :: SectorIndex -> SectorOffset -> M DirRecord
-getDirRecord si so = do
+getLongNamePart :: SectorIndex -> SectorOffset -> M String
+getLongNamePart si so = do
+  bs <- sequence [ get8 si (so+i) | i <- [1,3,5,7,9, 14,16,18,20,22,24, 28,30] ]
+  pure [ toChar b | b <- takeWhile (/=0) bs ]
+
+getDirRecord :: String -> SectorIndex -> SectorOffset -> M DirRecord
+getDirRecord longName si so = do
   firstByte <- get8 si so
   attr <- get8 si (so+0xB)
   let
@@ -159,7 +168,7 @@ getDirRecord si so = do
   fileSize <- get32 si (so + 0x1C)
   shortName <- map toChar <$> getBytes si so 11
   let isDir = (attr .&. 0x10) /= 0
-  pure DirRecord { kind,attr,firstCluster,fileSize,shortName,isDir }
+  pure DirRecord { kind,attr,firstCluster,fileSize,shortName,longName,isDir }
 
 getFileContents :: VolumeInfo -> DirRecord -> M String
 getFileContents vol dr = do
@@ -205,6 +214,7 @@ data DirRecord = DirRecord
   , firstCluster :: CN
   , fileSize :: W32
   , shortName :: String
+  , longName :: String
   , isDir :: Bool
   } deriving Show
 
@@ -255,6 +265,7 @@ exec m0 path = do
       Bind m f -> do a <- go m; go (f a)
       Print x ->  print x
       ReadSector (SectorIndex n) -> do
+        --print ("ReadSector",n)
         pure (Sector (B.drop (sectorSize * fi n) theBS))
   go m0
 
