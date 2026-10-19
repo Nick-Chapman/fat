@@ -4,20 +4,21 @@
 
 here=$(pwd)
 
-width=$1
-result=$2
+script=$1
+width=$2
+result=$3
 
 image=/tmp/fat.image
 fs=/mnt/play
 
-dd if=/dev/zero of=$image bs=512 count=20000 2>&1
+dd if=/dev/zero of=$image bs=512 count=40000 2>&1
 /sbin/mkfs.vfat -s 1 -F $width $image 2>&1
 file $image
 
 mount $fs
 (
 cd $fs
-. $here/script1
+. $here/$script
 )
 
 

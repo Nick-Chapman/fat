@@ -1,0 +1,2 @@
+cp -rp ~/code/quarter-forth .
+cp -rp ~/code/wordle .

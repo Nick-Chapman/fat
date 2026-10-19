@@ -30,6 +30,11 @@ interact = exec $ do
       , Cat "z.list"
       , Cd ".."
       , Ls
+{-      , Cd "wordle"
+      , Ls
+      , Cd "src"
+      , Ls
+      , Cat "Memo.hs"-}
       ]
   loop state0 coms
 
@@ -378,16 +383,31 @@ exec :: M a -> FilePath -> IO a
 exec m0 path = do
   theBS <- B.readFile path
   let
-    go :: M a -> IO a
-    go = \case
-      Pure x -> pure x
-      Bind m f -> do a <- go m; go (f a)
-      Print x -> print x
-      PutStr x -> putStr x
-      ReadSector (SectorIndex n) -> do
-        --print ("ReadSector",n)
-        pure (Sector (B.drop (sectorSize * fi n) theBS))
-  go m0
+    reallyReadSector :: SectorCache -> SectorIndex -> IO (Sector,SectorCache)
+    reallyReadSector cache si@(SectorIndex n) = do
+      --print ("ReadSector",n)
+      let sec = Sector (B.drop (sectorSize * fi n) theBS)
+      pure (sec, cache { lastSI = si, lastSec = sec })
+
+    go :: SectorCache -> M a -> IO (a,SectorCache)
+    go c = \case
+      Pure x -> pure (x,c)
+      Bind m f -> do (a,c) <- go c m; go c (f a)
+      Print x -> do print x; pure ((),c)
+      PutStr x -> do putStr x; pure ((),c)
+      ReadSector si -> do
+        let SectorCache {lastSI,lastSec} = c
+        if si == lastSI then pure (lastSec,c) else do
+        reallyReadSector c si
+
+  let si = SectorIndex 0 -- volume index
+  let cu = SectorCache { lastSI = undefined, lastSec = undefined }
+  (_sec,c0) <- reallyReadSector cu si
+  (a,_c) <- go c0 m0
+  pure a
+
+
+data SectorCache = SectorCache { lastSI:: SectorIndex, lastSec :: Sector }
 
 newtype W8 = W8 Word8
   deriving (Num,Integral,Real,Enum,Ord,Eq,Bits)
