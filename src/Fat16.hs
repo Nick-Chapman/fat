@@ -56,12 +56,12 @@ getTree vol = do
 
 data VolumeInfo = VolumeInfo
   { sectorsPerCluster :: W8
-  , numberReservedSectors :: W16
-  , numberOfFats :: W8
-  , numberOfRootEntries :: W16
-  , sectorsPerFat :: W16
-  , sig :: W16
-  , sectorsForRootDir :: W16
+--  , numberReservedSectors :: W16
+--  , numberOfFats :: W8
+--  , numberOfRootEntries :: W16
+--  , sectorsPerFat :: W16
+--  , sig :: W16
+--  , sectorsForRootDir :: W16
   , fatBegin :: SectorIndex
   , rootDirBegin :: SectorIndex
   , clusterBegin :: SectorIndex
@@ -94,12 +94,12 @@ getVolumeInfo si = do
   let clusterBegin = rootDirBegin + fi sectorsForRootDir
 
   pure VolumeInfo { sectorsPerCluster
-                  , numberReservedSectors
-                  , numberOfFats
-                  , numberOfRootEntries
-                  , sectorsPerFat
-                  , sig
-                  , sectorsForRootDir
+                  --, numberReservedSectors
+                  --, numberOfFats
+                  --, numberOfRootEntries
+                  --, sectorsPerFat
+                  --, sig
+                  --, sectorsForRootDir
                   , fatBegin
                   , rootDirBegin
                   , clusterBegin
