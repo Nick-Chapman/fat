@@ -1,9 +1,9 @@
 
-fat16.image: make-image.sh
-  ./make-image.sh 16 $out 2>/dev/null >/dev/null
+fat16.image: make-image.sh script1
+  ./make-image.sh 16 $out >/dev/null
 
-fat32.image: make-image.sh
-  ./make-image.sh 32 $out 2>/dev/null >/dev/null
+fat32.image: make-image.sh script1
+  ./make-image.sh 32 $out >/dev/null
 
 *top16: src/fat.exe fat16.image
   ./$in1 -16 $in2
