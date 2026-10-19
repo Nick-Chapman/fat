@@ -1,5 +1,6 @@
-module Fat16 (decode) where
+module Fat16 (decode,interact) where
 
+import Prelude hiding (interact)
 import Control.Exception (assert)
 import Control.Monad (ap,liftM)
 import Data.Bits (Bits,(.&.))
@@ -8,6 +9,123 @@ import Data.ByteString.Internal (w2c)
 import Data.Word (Word8,Word16,Word32)
 import FileTree (Tree(..),Entry(..))
 import Text.Printf (printf)
+
+interact :: FilePath -> IO ()
+interact = exec $ do
+  vol <- getVolumeInfo (SectorIndex 0)
+  --PutStr (show vol ++ "\n")
+  let
+    loop :: State -> [Com] -> M ()
+    loop state = \case
+      [] -> pure ()
+      com:coms -> do
+        PutStr (printf "> %s\n" (showCom com))
+        state <- execCom vol state com
+        loop state coms
+  let
+    coms =
+      [ Ls
+      , Cd "quarter-forth"
+      , Ls
+      , Cat "z.list"
+      , Cd ".."
+      , Ls
+      ]
+  loop state0 coms
+
+type Vol = VolumeInfo
+
+data Com = Ls | Cat Name | Cd Name
+
+showCom :: Com -> String
+showCom = \case
+  Ls -> "ls -l"
+  Cat name -> "cat " ++ name
+  Cd name -> "cd " ++ name
+
+type Name = String
+
+data State = State { cwd :: Dir }
+
+state0 :: State
+state0 = State { cwd = Root }
+
+execCom :: Vol -> State -> Com -> M State
+execCom vol state@State{cwd} = \case
+  Ls -> do
+    lsDirAction vol cwd
+    pure state
+  Cat name -> do
+    lookupFile vol cwd name >>= \case
+      Nothing -> pure state
+      Just file -> do
+        catFileAction vol file
+        pure state
+  Cd name -> do
+    lookupSubDir vol cwd name >>= \case
+      Nothing -> pure state
+      Just dir -> pure state { cwd = dir }
+
+data Dir = Root | Sub CN
+data File = File DirRecord
+data Item = IDir Dir | IFile File
+
+lookupSubDir :: Vol -> Dir -> Name -> M (Maybe Dir)
+lookupSubDir vol dir name =
+  lookupItem vol dir name >>= \case
+    Nothing -> pure Nothing
+    Just (IDir dir) -> pure (Just dir)
+    Just (IFile{}) -> do
+      errM (printf "not a directory:"  ++ name)
+      pure Nothing
+
+lookupFile :: Vol -> Dir -> Name -> M (Maybe File)
+lookupFile vol dir name =
+  lookupItem vol dir name >>= \case
+    Nothing -> pure Nothing
+    Just (IFile file) -> pure (Just file)
+    Just (IDir{}) -> do
+      errM (printf "not a file: %s" name)
+      pure Nothing
+
+lsDirAction :: Vol -> Dir -> M ()
+lsDirAction vol dir = do
+  rs <- case dir of
+    Root -> getRootDirInfo vol
+    Sub cn -> getDirInfo vol cn
+  let
+    showRec :: DirRecord -> String
+    showRec DirRecord{longName,fileSize,isDir} = do
+      let i :: Int = fromIntegral fileSize
+      let mode = (if isDir then "d" else "-")
+      let slashMaybe = (if isDir then "/" else "")
+      printf "%s %6i  %s%s\n" mode i longName slashMaybe
+  mapM_ (PutStr . showRec) rs
+
+lookupItem :: Vol -> Dir -> Name -> M (Maybe Item)
+lookupItem vol dir sought = do
+  rs <- case dir of -- TODO: be incremental?
+    Root -> getRootDirInfo vol
+    Sub cn -> getDirInfo vol cn
+  case [ if isDir
+         then IDir (if firstCluster == 0 then Root else Sub firstCluster)
+         else IFile (File dr)
+       | dr@DirRecord{longName,isDir,firstCluster} <- rs
+       , longName == sought
+       ] of
+    item:_ -> pure (Just item)
+    [] -> do
+      errM (printf "no such item: " ++ sought )
+      pure Nothing
+
+errM :: String -> M ()
+errM s = PutStr ("Error: " ++ s ++ "\n")
+
+catFileAction :: Vol -> File -> M ()
+catFileAction vol (File dr) = do
+  getFileContents vol dr >>= PutStr
+
+----------------------------------------------------------------------
 
 fi :: (Integral a, Num b) => a -> b
 fi x = fromIntegral x
@@ -19,12 +137,8 @@ bytesPerDirEntry :: Int
 bytesPerDirEntry = 32
 
 decode :: FilePath -> IO Tree
-decode path = exec decoder path
-
-decoder :: M Tree
-decoder = do
+decode = exec $ do
   vol <- getVolumeInfo (SectorIndex 0)
-  --Print vol
   getTree vol
 
 getTree :: VolumeInfo -> M Tree
@@ -39,9 +153,9 @@ getTree vol = do
     deepTree cn = do
       rs <- getDirInfo vol cn
       binds <- sequence [ do entry <- deepEntry r; pure (longName,entry)
-                        | r@DirRecord{shortName,longName} <- rs
-                        , shortName /= ".          "
-                        , shortName /= "..         "
+                        | r@DirRecord{longName} <- rs
+                        , longName /= "."
+                        , longName /= ".."
                         ]
       pure (Tree binds)
 
@@ -109,18 +223,18 @@ getRootDirInfo :: VolumeInfo -> M [DirRecord]
 getRootDirInfo VolumeInfo{rootDirBegin} = loop "" rootDirBegin 0
   where
     loop :: String -> SectorIndex -> Int -> M [DirRecord]
-    loop suffix si i = if
+    loop acc si i = if
       | i >= 16 -> do
-          loop suffix (si+1) 0
+          loop acc (si+1) 0
       | otherwise -> do
           let so = fi bytesPerDirEntry * fi i
-          dr@DirRecord{kind} <- getDirRecord suffix si so
+          dr@DirRecord{kind} <- getDirRecord acc si so
           case kind of
             DRK_EndOfDir -> pure []
-            DRK_Unused -> loop suffix si (i+1)
+            DRK_Unused -> loop acc si (i+1)
             DRK_Long -> do
               part <- getLongNamePart si so
-              loop (part++suffix) si (i+1)
+              loop (part++acc) si (i+1)
             DRK_Normal -> do
               drs <- loop "" si (i+1)
               pure (dr:drs)
@@ -131,20 +245,20 @@ getDirInfo vol cn = loop "" cn 0
     VolumeInfo{sectorsPerCluster} = vol
     recordsPerCluster = 16 * fromIntegral sectorsPerCluster
     loop :: String -> CN -> Int -> M [DirRecord]
-    loop suffix cn i = if
+    loop acc cn i = if
       | i >= recordsPerCluster -> do
           cn' <- stepFatChain vol cn
-          loop suffix cn' 0
+          loop acc cn' 0
       | otherwise -> do
           let si = siFromClusterNumber vol cn
           let so = fi (bytesPerDirEntry * i)
-          dr@DirRecord{kind} <- getDirRecord suffix si so
+          dr@DirRecord{kind} <- getDirRecord acc si so
           case kind of
             DRK_EndOfDir -> pure []
-            DRK_Unused -> loop suffix cn (i+1)
+            DRK_Unused -> loop acc cn (i+1)
             DRK_Long -> do
               part <- getLongNamePart si so
-              loop (part++suffix) cn (i+1)
+              loop (part++acc) cn (i+1)
             DRK_Normal -> do
               drs <- loop "" cn (i+1)
               pure (dr:drs)
@@ -155,7 +269,7 @@ getLongNamePart si so = do
   pure [ toChar b | b <- takeWhile (/=0) bs ]
 
 getDirRecord :: String -> SectorIndex -> SectorOffset -> M DirRecord
-getDirRecord longName si so = do
+getDirRecord acc si so = do
   firstByte <- get8 si so
   attr <- get8 si (so+0xB)
   let
@@ -167,6 +281,10 @@ getDirRecord longName si so = do
   firstCluster <- CN <$> get16 si (so + 0x1A)
   fileSize <- get32 si (so + 0x1C)
   shortName <- map toChar <$> getBytes si so 11
+  let longName = if
+        | shortName == ".          " -> "."
+        | shortName == "..         " -> ".."
+        | otherwise -> acc
   let isDir = (attr .&. 0x10) /= 0
   pure DirRecord { kind,attr,firstCluster,fileSize,shortName,longName,isDir }
 
@@ -254,6 +372,7 @@ data M a where
   Bind :: M a -> (a -> M b) -> M b
   ReadSector :: SectorIndex -> M Sector
   Print :: Show a => a -> M ()
+  PutStr :: String -> M ()
 
 exec :: M a -> FilePath -> IO a
 exec m0 path = do
@@ -263,7 +382,8 @@ exec m0 path = do
     go = \case
       Pure x -> pure x
       Bind m f -> do a <- go m; go (f a)
-      Print x ->  print x
+      Print x -> print x
+      PutStr x -> putStr x
       ReadSector (SectorIndex n) -> do
         --print ("ReadSector",n)
         pure (Sector (B.drop (sectorSize * fi n) theBS))
