@@ -1,22 +1,24 @@
 
 module CachedDisk
-  ( M (Message,ReadSector), exec
+  ( M (ReadSector), exec
   ) where
 
-import Text.Printf (printf)
 import Control.Monad (ap,liftM)
+import Control.Monad.IO.Class (MonadIO,liftIO)
 import Disk qualified
+import Text.Printf (printf)
 import Types
 
 instance Functor M where fmap = liftM
 instance Applicative M where pure = Pure; (<*>) = ap
 instance Monad M where (>>=) = Bind
+instance MonadIO M where liftIO = LiftIO
 
 data M a where
   Pure :: a -> M a
   Bind :: M a -> (a -> M b) -> M b
+  LiftIO :: IO a -> M a
   ReadSector :: SectorIndex -> M Sector
-  Message :: String -> M ()
 
 data Cache = Cache
   { siA:: SectorIndex
@@ -35,20 +37,20 @@ initCache = do
   let secB = undefined
   pure Cache { siA, secA, siB, secB, hitsA = 0, hitsB = 0 }
 
-exec :: forall a. M a -> FilePath -> IO a
-exec m0 path = Disk.exec path $ do
+exec :: forall a. FilePath -> M a -> IO a
+exec path m0 = Disk.exec path do
   s0 <- initCache
   res <- loop s0 m0 k0
   pure res
   where
     k0 Cache{hitsA,hitsB} a = do
-      Disk.Message (printf "[#hits=%d+%d]\n" hitsA hitsB)
+      liftIO (printf "[#hits=%d+%d]\n" hitsA hitsB)
       pure a
     loop :: forall a b. Cache -> M a -> (Cache -> a -> Disk.M b) -> Disk.M b
     loop c = \case
       Pure x -> \k -> k c x
       Bind m f -> \k -> loop c m \c a -> loop c (f a) k
-      Message str -> \k -> do Disk.Message str; k c ()
+      LiftIO io -> \k -> liftIO io >>= k c
       ReadSector si -> \k -> do
         (sec,c) <- readSector c si
         k c sec

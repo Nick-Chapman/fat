@@ -7,7 +7,7 @@ interact.image: make-image.sh script-interact
 
 
 *top16: src/fat.exe fat16.image
-  ./$in1 -16 $in2
+  ./$in1 $in2
 
 *interact: src/fat.exe interact.image
   ./$in -i $in2

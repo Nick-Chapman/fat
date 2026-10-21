@@ -1,23 +1,25 @@
 
 module Disk
-  ( M (Message,ReadSector), exec
+  ( M (ReadSector), exec
   ) where
 
 import Control.Monad (ap,liftM)
+import Control.Monad.IO.Class (MonadIO,liftIO)
 import Data.ByteString qualified as B
-import Text.Printf (printf)
 import Data.Map as Map
+import Text.Printf (printf)
 import Types
 
 instance Functor M where fmap = liftM
 instance Applicative M where pure = Pure; (<*>) = ap
 instance Monad M where (>>=) = Bind
+instance MonadIO M where liftIO = LiftIO
 
 data M a where
   Pure :: a -> M a
   Bind :: M a -> (a -> M b) -> M b
+  LiftIO :: IO a -> M a
   ReadSector :: SectorIndex -> M Sector
-  Message :: String -> M ()
 
 data Tracking = Tracking
   { reads :: Map SectorIndex Int
@@ -34,7 +36,7 @@ exec path m0 = do
     go c = \case
       Pure x -> pure (x,c)
       Bind m f -> do (a,c) <- go c m; go c (f a)
-      Message x -> do putStr x; pure ((),c)
+      LiftIO io -> do a <- io; pure (a,c)
       ReadSector si -> do
         --print ("ReadSector",si)
         let Tracking{reads} = c

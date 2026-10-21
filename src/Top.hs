@@ -16,7 +16,6 @@ main = do
     Interact16 -> do
       Fat16.interact imageFile
 
-
 data Config = Config
   { imageFile :: FilePath
   , mode :: Mode

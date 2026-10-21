@@ -1,2 +1,3 @@
 cp -rp ~/code/quarter-forth .
 cp -rp ~/code/wordle .
+echo 'Some files to play with.' > README.txt

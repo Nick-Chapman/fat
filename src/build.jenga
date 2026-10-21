@@ -28,3 +28,6 @@ default-extensions:
 
 packages:
   echo bytestring >> $out
+  echo transformers >> $out
+  echo haskeline >> $out
+  echo ansi-terminal >> $out

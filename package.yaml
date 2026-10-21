@@ -12,6 +12,9 @@ dependencies:
 - bytestring
 - containers
 - text
+- haskeline
+- ansi-terminal
+- transformers
 
 default-extensions:
 - DuplicateRecordFields
@@ -23,6 +26,9 @@ default-extensions:
 - NumericUnderscores
 - RecordWildCards
 - ScopedTypeVariables
+- GeneralizedNewtypeDeriving
+- BlockArguments
+- NondecreasingIndentation
 # - Strict
 
 ghc-options:

@@ -1,51 +1,56 @@
 module Fat16 (decode,interact) where
 
 import Control.Exception (assert)
+import Control.Monad.IO.Class (liftIO)
 import Data.Bits ((.&.))
 import FileTree (Tree(..),Entry(..))
 import Prelude hiding (interact)
+import System.Console.ANSI qualified as AN
+import System.Console.Haskeline qualified as HL
 import Text.Printf (printf)
-
 import Types
-import CachedDisk (M (Message,ReadSector), exec)
+
+import CachedDisk (M (ReadSector), exec)
+
+runHL :: HL.InputT IO a -> IO a
+runHL = HL.runInputT HL.defaultSettings
 
 interact :: FilePath -> IO ()
-interact = exec $ do
-  vol <- getVolumeInfo 0
-  --Message (show vol ++ "\n")
-  let
-    loop :: State -> [Com] -> M ()
-    loop state = \case
-      [] -> pure ()
-      com:coms -> do
-        Message (printf "> %s\n" (showCom com))
-        state <- execCom vol state com
-        loop state coms
-  let
-    coms =
-      [ Ls
-      , Cd "quarter-forth"
-      , Ls
-      , Cat "z.list"
-      , Cd ".."
-      , Ls
-{-      , Cd "wordle"
-      , Ls
-      , Cd "src"
-      , Ls
-      , Cat "Memo.hs"-}
-      ]
-  loop state0 coms
+interact path = do
+  exec path $ do
+    vol <- getVolumeInfo 0
+    let
+      loop :: State -> M ()
+      loop state = do
+        (liftIO $ runHL $ HL.getInputLine (col AN.Green $ "> ")) >>= \case
+          Nothing -> pure ()
+          Just line -> do
+            case parseCom line of
+              Nothing -> do
+                liftIO $ putStrLn (col AN.Red "syntax error")
+                loop state
+              Just com -> do
+                state <- execCom vol state com
+                loop state
+
+    loop state0
+
+col :: AN.Color -> String -> String
+col c s =
+  AN.setSGRCode [AN.SetColor AN.Foreground AN.Vivid c] <> s <>
+  AN.setSGRCode [AN.SetColor AN.Foreground AN.Vivid AN.White]
+
+parseCom :: String -> Maybe Com
+parseCom s =
+  case words s of
+    ["ls"] -> Just Ls
+    ["cd",name] -> Just (Cd name)
+    ["cat",name] -> Just (Cat name)
+    _ -> Nothing
 
 type Vol = VolumeInfo
 
 data Com = Ls | Cat Name | Cd Name
-
-showCom :: Com -> String
-showCom = \case
-  Ls -> "ls -l"
-  Cat name -> "cat " ++ name
-  Cd name -> "cd " ++ name
 
 type Name = String
 
@@ -98,13 +103,13 @@ lsDirAction vol dir = do
     Root -> getRootDirInfo vol
     Sub cn -> getDirInfo vol cn
   let
-    showRec :: DirRecord -> String
+    showRec :: DirRecord -> IO ()
     showRec DirRecord{longName,fileSize,isDir} = do
       let i :: Int = fromIntegral fileSize
       let mode = (if isDir then "d" else "-")
       let slashMaybe = (if isDir then "/" else "")
       printf "%s %6i  %s%s\n" mode i longName slashMaybe
-  mapM_ (Message . showRec) rs
+  mapM_ (liftIO . showRec) rs
 
 lookupItem :: Vol -> Dir -> Name -> M (Maybe Item)
 lookupItem vol dir sought = do
@@ -123,11 +128,11 @@ lookupItem vol dir sought = do
       pure Nothing
 
 errM :: String -> M ()
-errM s = Message ("Error: " ++ s ++ "\n")
+errM s = liftIO $ putStrLn ("Error: " ++ s ++ "\n")
 
 catFileAction :: Vol -> File -> M ()
 catFileAction vol (File dr) = do
-  getFileContents vol dr >>= Message
+  getFileContents vol dr >>= liftIO . putStr
 
 ----------------------------------------------------------------------
 
@@ -138,7 +143,7 @@ bytesPerDirEntry :: Int
 bytesPerDirEntry = 32
 
 decode :: FilePath -> IO Tree
-decode = exec $ do
+decode path = exec path $ do
   vol <- getVolumeInfo 0
   getTree vol
 
