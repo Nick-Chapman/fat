@@ -1,4 +1,5 @@
-[#reads=39; #hits=2390]
+[#hits=2390]
+[#reads=39]
 /first : "contents\n"
 /abc-defghijklmnopqrstuvwxyz : "q\n"
 /zero : ""

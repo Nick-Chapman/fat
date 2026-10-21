@@ -7,10 +7,10 @@ import Prelude hiding (interact)
 import Text.Printf (printf)
 
 import Types
-import Disk (M (Message,ReadSector), execDisk)
+import CachedDisk (M (Message,ReadSector), exec)
 
 interact :: FilePath -> IO ()
-interact = execDisk $ do
+interact = exec $ do
   vol <- getVolumeInfo 0
   --Message (show vol ++ "\n")
   let
@@ -138,7 +138,7 @@ bytesPerDirEntry :: Int
 bytesPerDirEntry = 32
 
 decode :: FilePath -> IO Tree
-decode = execDisk $ do
+decode = exec $ do
   vol <- getVolumeInfo 0
   getTree vol
 

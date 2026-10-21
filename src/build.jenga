@@ -24,6 +24,7 @@ default-extensions:
   echo RecordWildCards >> $out
   # echo Strict >> $out
   echo NondecreasingIndentation >> $out
+  echo BlockArguments >> $out
 
 packages:
   echo bytestring >> $out
