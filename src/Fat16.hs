@@ -383,31 +383,47 @@ exec :: M a -> FilePath -> IO a
 exec m0 path = do
   theBS <- B.readFile path
   let
-    reallyReadSector :: SectorCache -> SectorIndex -> IO (Sector,SectorCache)
-    reallyReadSector cache si@(SectorIndex n) = do
+    reallyReadSector :: DiskState -> SectorIndex -> IO (Sector,DiskState)
+    reallyReadSector cache@DiskState{readCount} si@(SectorIndex n) = do
       --print ("ReadSector",n)
       let sec = Sector (B.drop (sectorSize * fi n) theBS)
-      pure (sec, cache { lastSI = si, lastSec = sec })
+      pure (sec, cache { lastSI = si, lastSec = sec, readCount = 1 + readCount })
 
-    go :: SectorCache -> M a -> IO (a,SectorCache)
+    go :: DiskState -> M a -> IO (a,DiskState)
     go c = \case
       Pure x -> pure (x,c)
       Bind m f -> do (a,c) <- go c m; go c (f a)
       Print x -> do print x; pure ((),c)
       PutStr x -> do putStr x; pure ((),c)
       ReadSector si -> do
-        let SectorCache {lastSI,lastSec} = c
-        if si == lastSI then pure (lastSec,c) else do
-        reallyReadSector c si
+        let DiskState {lastSI,lastSec,cacheHitCount} = c
+        if si == lastSI
+          then pure (lastSec,c { cacheHitCount = 1 + cacheHitCount })
+          else reallyReadSector c si
 
   let si = SectorIndex 0 -- volume index
-  let cu = SectorCache { lastSI = undefined, lastSec = undefined }
+  let cu = state0
   (_sec,c0) <- reallyReadSector cu si
-  (a,_c) <- go c0 m0
+  (a,cFinal) <- go c0 m0
+  let DiskState{readCount,cacheHitCount} = cFinal
+  printf "[#reads=%d; #hits=%d]\n" readCount cacheHitCount
   pure a
+    where
+      state0 :: DiskState
+      state0 = DiskState
+        { readCount = 0
+        , cacheHitCount = 0
+        , lastSI = undefined
+        , lastSec = undefined
+        }
 
 
-data SectorCache = SectorCache { lastSI:: SectorIndex, lastSec :: Sector }
+data DiskState = DiskState
+  { readCount :: Int
+  , cacheHitCount :: Int
+  , lastSI:: SectorIndex
+  , lastSec :: Sector
+  }
 
 newtype W8 = W8 Word8
   deriving (Num,Integral,Real,Enum,Ord,Eq,Bits)
