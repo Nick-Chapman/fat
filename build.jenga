@@ -1,32 +1,22 @@
 
 fat16.image: make-image.sh script1
-  ./$in1 $in2 16 $out >/dev/null
-
-fat32.image: make-image.sh script1
-  ./$in1 $in2 32 $out >/dev/null
+  ./$in1 $in2 $out >/dev/null
 
 interact.image: make-image.sh script-interact
-  ./$in1 $in2 16 $out > /dev/null
+  ./$in1 $in2 $out > /dev/null
 
 
 *top16: src/fat.exe fat16.image
   ./$in1 -16 $in2
 
-*top32: src/fat.exe fat32.image
-  ./$in1 -32 $in2
-
 *interact: src/fat.exe interact.image
-  ./$in -16 -i $in2
+  ./$in -i $in2
 
 
 example16.out : src/fat.exe fat16.image
-  ./$in1 -16 $in2 > $out
-
-example32.out : src/fat.exe fat32.image
-  ./$in1 -32 $in2 > $out
+  ./$in1 $in2 > $out
 
 expect.names :
   echo example16.out >> $out
-  echo example32.out >> $out
 
 include ~/code/jenga/rulelib/expect.jenga
