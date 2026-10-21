@@ -1,25 +1,24 @@
 module Fat16 (decode,interact) where
 
 import Control.Exception (assert)
-import Control.Monad (ap,liftM)
 import Data.Bits ((.&.))
-import Data.ByteString qualified as B
 import FileTree (Tree(..),Entry(..))
 import Prelude hiding (interact)
 import Text.Printf (printf)
 
 import Types
+import Disk (M (Message,ReadSector), execDisk)
 
 interact :: FilePath -> IO ()
-interact = exec $ do
+interact = execDisk $ do
   vol <- getVolumeInfo 0
-  --PutStr (show vol ++ "\n")
+  --Message (show vol ++ "\n")
   let
     loop :: State -> [Com] -> M ()
     loop state = \case
       [] -> pure ()
       com:coms -> do
-        PutStr (printf "> %s\n" (showCom com))
+        Message (printf "> %s\n" (showCom com))
         state <- execCom vol state com
         loop state coms
   let
@@ -105,7 +104,7 @@ lsDirAction vol dir = do
       let mode = (if isDir then "d" else "-")
       let slashMaybe = (if isDir then "/" else "")
       printf "%s %6i  %s%s\n" mode i longName slashMaybe
-  mapM_ (PutStr . showRec) rs
+  mapM_ (Message . showRec) rs
 
 lookupItem :: Vol -> Dir -> Name -> M (Maybe Item)
 lookupItem vol dir sought = do
@@ -124,11 +123,11 @@ lookupItem vol dir sought = do
       pure Nothing
 
 errM :: String -> M ()
-errM s = PutStr ("Error: " ++ s ++ "\n")
+errM s = Message ("Error: " ++ s ++ "\n")
 
 catFileAction :: Vol -> File -> M ()
 catFileAction vol (File dr) = do
-  getFileContents vol dr >>= PutStr
+  getFileContents vol dr >>= Message
 
 ----------------------------------------------------------------------
 
@@ -139,7 +138,7 @@ bytesPerDirEntry :: Int
 bytesPerDirEntry = 32
 
 decode :: FilePath -> IO Tree
-decode = exec $ do
+decode = execDisk $ do
   vol <- getVolumeInfo 0
   getTree vol
 
@@ -361,60 +360,3 @@ get8 si so = do
   sec <- ReadSector si
   let byte = readInSector sec so
   pure byte
-
-instance Functor M where fmap = liftM
-instance Applicative M where pure = Pure; (<*>) = ap
-instance Monad M where (>>=) = Bind
-
-data M a where
-  Pure :: a -> M a
-  Bind :: M a -> (a -> M b) -> M b
-  ReadSector :: SectorIndex -> M Sector
-  Print :: Show a => a -> M ()
-  PutStr :: String -> M ()
-
-exec :: M a -> FilePath -> IO a
-exec m0 path = do
-  theBS <- B.readFile path
-  let
-    reallyReadSector :: DiskState -> SectorIndex -> IO (Sector,DiskState)
-    reallyReadSector cache@DiskState{readCount} si = do
-      --print ("ReadSector",n)
-      let sec = mkSector theBS si
-      pure (sec, cache { lastSI = si, lastSec = sec, readCount = 1 + readCount })
-
-    go :: DiskState -> M a -> IO (a,DiskState)
-    go c = \case
-      Pure x -> pure (x,c)
-      Bind m f -> do (a,c) <- go c m; go c (f a)
-      Print x -> do print x; pure ((),c)
-      PutStr x -> do putStr x; pure ((),c)
-      ReadSector si -> do
-        let DiskState {lastSI,lastSec,cacheHitCount} = c
-        if si == lastSI
-          then pure (lastSec,c { cacheHitCount = 1 + cacheHitCount })
-          else reallyReadSector c si
-
-  let si = 0 -- volume index
-  let cu = state0
-  (_sec,c0) <- reallyReadSector cu si
-  (a,cFinal) <- go c0 m0
-  let DiskState{readCount,cacheHitCount} = cFinal
-  printf "[#reads=%d; #hits=%d]\n" readCount cacheHitCount
-  pure a
-    where
-      state0 :: DiskState
-      state0 = DiskState
-        { readCount = 0
-        , cacheHitCount = 0
-        , lastSI = undefined
-        , lastSec = undefined
-        }
-
-
-data DiskState = DiskState
-  { readCount :: Int
-  , cacheHitCount :: Int
-  , lastSI:: SectorIndex
-  , lastSec :: Sector
-  }
