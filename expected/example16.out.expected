@@ -1,5 +1,6 @@
-[#hits=2390]
-[#reads=39, #unique=37]
+[#hits=1012+1377]
+[#reads=39, #reps=2]
+[reps:[($0001,3)]]
 /first : "contents\n"
 /abc-defghijklmnopqrstuvwxyz : "q\n"
 /zero : ""

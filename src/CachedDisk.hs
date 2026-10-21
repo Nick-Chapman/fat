@@ -19,16 +19,21 @@ data M a where
   Message :: String -> M ()
 
 data Cache = Cache
-  { lastSI:: SectorIndex
-  , lastSec :: Sector
-  , hits :: Int
+  { siA:: SectorIndex
+  , secA :: Sector
+  , siB:: SectorIndex
+  , secB :: Sector
+  , hitsA :: Int
+  , hitsB :: Int
   }
 
 initCache :: Disk.M Cache
 initCache = do
-  let lastSI = 0
-  lastSec <- Disk.ReadSector lastSI
-  pure Cache { lastSI, lastSec, hits = 0 }
+  let siA = -1
+  let siB = -1
+  let secA = undefined
+  let secB = undefined
+  pure Cache { siA, secA, siB, secB, hitsA = 0, hitsB = 0 }
 
 exec :: forall a. M a -> FilePath -> IO a
 exec m0 path = Disk.exec path $ do
@@ -36,8 +41,8 @@ exec m0 path = Disk.exec path $ do
   res <- loop s0 m0 k0
   pure res
   where
-    k0 Cache{hits} a = do
-      Disk.Message (printf "[#hits=%d]\n" hits)
+    k0 Cache{hitsA,hitsB} a = do
+      Disk.Message (printf "[#hits=%d+%d]\n" hitsA hitsB)
       pure a
     loop :: forall a b. Cache -> M a -> (Cache -> a -> Disk.M b) -> Disk.M b
     loop c = \case
@@ -49,9 +54,22 @@ exec m0 path = Disk.exec path $ do
         k c sec
 
 readSector :: Cache -> SectorIndex -> Disk.M (Sector, Cache)
-readSector c@Cache{lastSI,lastSec,hits} si = if
-  | si == lastSI -> do
-    pure (lastSec, c { hits = 1 + hits })
-  | otherwise -> do
-      sec <- Disk.ReadSector si
-      pure (sec, c { lastSI = si, lastSec = sec })
+readSector c@Cache{siA,secA,siB,secB,hitsA,hitsB} si = if
+
+--  | True && True -> if -- Always in A
+  | si `mod` 2 == 0 -> if -- Odd/Even Split
+--  | si < 0x200 -> if -- Low/High Split
+--  | si < 0x2 -> if -- surprisingly performs the best on my two examples
+
+    | si == siA -> do
+        pure (secA, c { hitsA = 1 + hitsA })
+    | otherwise -> do
+        sec <- Disk.ReadSector si
+        pure (sec, c { siA = si, secA = sec })
+
+  | otherwise -> if
+    | si == siB -> do
+        pure (secB, c { hitsB = 1 + hitsB })
+    | otherwise -> do
+        sec <- Disk.ReadSector si
+        pure (sec, c { siB = si, secB = sec })

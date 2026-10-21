@@ -43,10 +43,8 @@ exec path m0 = do
 
   (a,Tracking{reads}) <- go initTracking m0
   let numReads = sum (Map.elems reads)
-  let numUnique = length (Map.keys reads)
+  let numRepeats = numReads - length (Map.keys reads)
   let _hist = [ (fromIntegral si :: W16,n) | (si,n) <- Map.toList reads, n > 1 ]
-  let _reps = [ n | (_,n) <- Map.toList reads, n > 1 ]
-  printf "[#reads=%d, #unique=%d]\n" numReads numUnique
-  --printf "[repeats:%s]\n" $ show _reps
-  --printf "[hist:%s]\n" $ show _hist
+  printf "[#reads=%d, #reps=%d]\n" numReads numRepeats
+  printf "[reps:%s]\n" $ show _hist
   pure a
