@@ -6,7 +6,7 @@ module Disk
 import Control.Monad (ap,liftM)
 import Data.ByteString qualified as B
 import Text.Printf (printf)
-
+import Data.Set as Set
 import Types
 
 instance Functor M where fmap = liftM
@@ -19,22 +19,30 @@ data M a where
   ReadSector :: SectorIndex -> M Sector
   Message :: String -> M ()
 
-data Counts = Counts { numReads :: Int }
+data Tracking = Tracking
+  { numReads :: Int
+  , indexes :: Set SectorIndex -- which have ever been read
+  }
+
+initTracking :: Tracking
+initTracking = Tracking { numReads = 0, indexes = Set.empty }
 
 exec :: FilePath -> M a -> IO a
 exec path m0 = do
   theBS <- B.readFile path
   let
-    go :: Counts -> M a -> IO (a,Counts)
+    go :: Tracking -> M a -> IO (a,Tracking)
     go c = \case
       Pure x -> pure (x,c)
       Bind m f -> do (a,c) <- go c m; go c (f a)
       Message x -> do putStr x; pure ((),c)
       ReadSector si -> do
         --print ("ReadSector",si)
-        let Counts{numReads} = c
-        pure (mkSector theBS si, c { numReads = 1 + numReads })
+        let Tracking{numReads,indexes} = c
+        let c' = c { numReads = 1 + numReads
+                   , indexes = Set.insert si indexes }
+        pure (mkSector theBS si, c')
 
-  (a,Counts{numReads}) <- go Counts { numReads = 0 } m0
-  printf "[#reads=%d]\n" numReads
+  (a,Tracking{numReads,indexes}) <- go initTracking m0
+  printf "[#reads=%d, #unique=%d]\n" numReads (Set.size indexes)
   pure a
