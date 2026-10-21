@@ -6,7 +6,7 @@ module Disk
 import Control.Monad (ap,liftM)
 import Data.ByteString qualified as B
 import Text.Printf (printf)
-import Data.Set as Set
+import Data.Map as Map
 import Types
 
 instance Functor M where fmap = liftM
@@ -20,12 +20,11 @@ data M a where
   Message :: String -> M ()
 
 data Tracking = Tracking
-  { numReads :: Int
-  , indexes :: Set SectorIndex -- which have ever been read
+  { reads :: Map SectorIndex Int
   }
 
 initTracking :: Tracking
-initTracking = Tracking { numReads = 0, indexes = Set.empty }
+initTracking = Tracking { reads = Map.empty }
 
 exec :: FilePath -> M a -> IO a
 exec path m0 = do
@@ -38,11 +37,16 @@ exec path m0 = do
       Message x -> do putStr x; pure ((),c)
       ReadSector si -> do
         --print ("ReadSector",si)
-        let Tracking{numReads,indexes} = c
-        let c' = c { numReads = 1 + numReads
-                   , indexes = Set.insert si indexes }
+        let Tracking{reads} = c
+        let c' = c { reads = Map.insertWithKey (\_ -> (+)) si 1 reads }
         pure (mkSector theBS si, c')
 
-  (a,Tracking{numReads,indexes}) <- go initTracking m0
-  printf "[#reads=%d, #unique=%d]\n" numReads (Set.size indexes)
+  (a,Tracking{reads}) <- go initTracking m0
+  let numReads = sum (Map.elems reads)
+  let numUnique = length (Map.keys reads)
+  let _hist = [ (fromIntegral si :: W16,n) | (si,n) <- Map.toList reads, n > 1 ]
+  let _reps = [ n | (_,n) <- Map.toList reads, n > 1 ]
+  printf "[#reads=%d, #unique=%d]\n" numReads numUnique
+  --printf "[repeats:%s]\n" $ show _reps
+  --printf "[hist:%s]\n" $ show _hist
   pure a
