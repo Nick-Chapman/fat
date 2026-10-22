@@ -7,14 +7,34 @@ module Fat16
   , getRootDirInfo
   , getDirInfo
   , getFileContents
+
+  , devMutM
   ) where
 
+import TheDisk (M (ReadSector,WriteSector))
 import Control.Exception (assert)
+import Control.Monad.IO.Class (liftIO)
 import Data.Bits ((.&.))
 import Prelude hiding (interact)
 import Types
 
-import CachedDisk (M (ReadSector))
+----------------------------------------------------------------------
+-- DEV: echo xxx > yyy (at root) -- match the bytes changed
+-- start by trying to change any bytes!
+devMutM :: M ()
+devMutM = do
+  --let si :: SectorIndex = fi (0xc94a00 `div` 512 :: Int)
+  let si = 0x64a5
+  liftIO $ print si
+
+  getBytes si 0 5 >>= liftIO.print
+  set8 si 1 0x79
+  getBytes si 0 5 >>= liftIO.print
+
+  pure ()
+
+
+----------------------------------------------------------------------
 
 fi :: (Integral a, Num b) => a -> b
 fi x = fromIntegral x
@@ -213,3 +233,9 @@ get8 si so = do
   sec <- ReadSector si
   let byte = readInSector sec so
   pure byte
+
+set8 :: SectorIndex -> SectorOffset -> W8 -> M ()
+set8 si so byte = do
+  sec <- ReadSector si
+  let sec' = writeInSector sec so byte
+  WriteSector si sec'

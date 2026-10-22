@@ -3,8 +3,8 @@ module Types
   ( W8, W16, W32, mk16, mk32, toChar
   , HL(..)
   , SectorIndex
-  , Sector, mkSector, sectorSize
-  , SectorOffset, readInSector
+  , Sector, sectorSize, mkSector, deSector
+  , SectorOffset, readInSector, writeInSector
   ) where
 
 import Data.Bits (Bits)
@@ -45,13 +45,21 @@ newtype SectorIndex = SectorIndex W16
 newtype SectorOffset = SectorOffset W16 -- TODO: actually only need 9 bits
   deriving (Num,Integral,Real,Enum,Ord,Eq,Bits,Show)
 
-newtype Sector = Sector B.ByteString
-
 sectorSize :: Int
 sectorSize = 512
 
-mkSector :: B.ByteString -> SectorIndex -> Sector
-mkSector bs (SectorIndex n) = Sector (B.drop (sectorSize * fi n) bs)
+newtype Sector = Sector [W8]
+
+mkSector :: B.ByteString -> Sector
+mkSector bs = Sector (map fromIntegral (B.unpack bs))
+
+deSector :: Sector -> B.ByteString
+deSector (Sector bytes) = B.pack (map fromIntegral bytes)
 
 readInSector :: Sector -> SectorOffset -> W8
-readInSector (Sector bs) (SectorOffset n) = W8 $ B.head (B.drop (fi n) bs)
+readInSector (Sector bs) (SectorOffset n) = bs !! fi n
+
+writeInSector :: Sector -> SectorOffset -> W8 -> Sector
+writeInSector (Sector bs) (SectorOffset n) b = Sector bs'
+  where
+    bs' = take (fi n) bs ++ [b] ++ drop (fi n + 1) bs -- terrible algorihmics!

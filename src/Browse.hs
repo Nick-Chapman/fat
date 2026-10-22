@@ -1,4 +1,4 @@
-module Browse (dump,interact) where
+module Browse (dump,interact,devMut) where
 
 import Control.Monad.IO.Class (liftIO)
 import FileTree (Tree(..),Entry(..),printTree)
@@ -6,8 +6,12 @@ import Prelude hiding (interact)
 import System.Console.ANSI qualified as AN
 import System.Console.Haskeline qualified as HL
 import Text.Printf (printf)
-import CachedDisk (M,exec)
+import TheDisk (M,exec)
 import Fat16
+
+devMut :: FilePath -> IO ()
+devMut path = exec path $ Fat16.devMutM
+
 
 dump :: FilePath -> IO ()
 dump path = exec path $ do

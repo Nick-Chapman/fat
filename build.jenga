@@ -14,7 +14,9 @@ interact.image: make-image.sh script-interact
 
 
 example16.out : src/fat.exe fat16.image
-  ./$in1 $in2 > $out
+  cp $in2 $in2.writable
+  chmod +w $in2.writable
+  ./$in1 $in2.writable > $out
 
 expect.names :
   echo example16.out >> $out

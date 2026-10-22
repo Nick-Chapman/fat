@@ -27,6 +27,4 @@
 /sub/thing17 : "p\n"
 /d : "x\n"
 /e : "x\n"
-[#hits=1012+1377]
-[#reads=39, #reps=2]
-[reps:[($0001,3)]]
+[#reads=2428]
