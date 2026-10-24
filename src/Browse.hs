@@ -9,9 +9,10 @@ import Text.Printf (printf)
 import TheDisk (M,exec)
 import Fat16
 
-devMut :: FilePath -> IO ()
-devMut path = exec path $ Fat16.devMutM
-
+devMut :: FilePath -> String -> String -> IO ()
+devMut path contents longName = exec path $ do
+  vol <- getVolumeInfo 0
+  echoRedirect vol (contents++"\n") longName
 
 dump :: FilePath -> IO ()
 dump path = exec path $ do
@@ -80,11 +81,12 @@ parseCom s =
     ["ls"] -> Just Ls
     ["cd",name] -> Just (Cd name)
     ["cat",name] -> Just (Cat name)
+    ["echo",s,">",name] -> Just (EchoRedirect s name)
     _ -> Nothing
 
 type Vol = VolumeInfo
 
-data Com = Ls | Cat Name | Cd Name
+data Com = Ls | Cat Name | Cd Name | EchoRedirect String Name
 
 type Name = String
 
@@ -108,6 +110,9 @@ execCom vol state@State{cwd} = \case
     lookupSubDir vol cwd name >>= \case
       Nothing -> pure state
       Just dir -> pure state { cwd = dir }
+  EchoRedirect contents longName -> do
+    echoRedirect vol (contents++"\n") longName
+    pure state
 
 data Dir = Root | Sub CN
 data File = File DirRecord

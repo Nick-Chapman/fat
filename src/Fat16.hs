@@ -8,30 +8,234 @@ module Fat16
   , getDirInfo
   , getFileContents
 
-  , devMutM
+  , echoRedirect
   ) where
 
 import TheDisk (M (ReadSector,WriteSector))
 import Control.Exception (assert)
 import Control.Monad.IO.Class (liftIO)
-import Data.Bits ((.&.))
+import Data.Bits ((.&.),(.|.),shiftL)
 import Prelude hiding (interact)
 import Types
+import Data.ByteString.Internal (c2w)
+import Data.Char (toUpper)
 
 ----------------------------------------------------------------------
 -- DEV: echo xxx > yyy (at root) -- match the bytes changed
 -- start by trying to change any bytes!
-devMutM :: M ()
-devMutM = do
-  --let si :: SectorIndex = fi (0xc94a00 `div` 512 :: Int)
-  let si = 0x64a5
-  liftIO $ print si
+echoRedirect :: Vol -> String -> String -> M ()
+echoRedirect vol contents longName = do -- echo contents > longName
 
-  getBytes si 0 5 >>= liftIO.print
-  set8 si 1 0x79
-  getBytes si 0 5 >>= liftIO.print
+  see (longName,contents)
 
+  n <- numRootDirInfo vol
+  let so :: SectorOffset = fi (32*n)
+  see (n,so)
+
+  cn <- nextFreeCluster vol
+  markClusterUsed vol cn
+  let si = siFromClusterNumber vol cn
+
+  --see ("next free cluster",cn)
+  --see ("@ sector index",si)
+
+  set8 si 3 0x0a
+  assert (length contents < 256) $ do
+  writeBytesInSector si contents
+
+  let VolumeInfo{rootDirBegin} = vol
+
+  let si = rootDirBegin
+
+--  let longName = "xxxxxxxxxxxxxyyyyyyyyyyyyy"
+
+  let max8 s = if length s > 8 then take 6 s ++ "~1" else take 8 (s ++ repeat ' ')
+  let shortName8 = max8 (map toUpper longName)
+
+  let extension3 = "   " -- TODO: split longname on dot
+
+  let attrByte = 0x20 -- archive flag
+  let date = Date { year = 2026, month = 10, day = 24 }
+  let time = Time { hour = 17, minute = 35, second = 0 }
+  let startingCluster = cn
+  let fileSize = fi (length contents)
+  let entry = Entry { shortName8, extension3, attrByte, time, date, startingCluster, fileSize}
+
+  --see entry
+
+  let
+    chop :: String -> [String]
+    chop s =
+      if length s <= 13 then [s] else
+        take 13 s : chop (drop 13 s)
+
+  let parts = chop longName
+
+  --let headerBytes = [0x41..] --0x01 : [0x42..]
+  --let headerBytes = 0x01 : 0x02 : [0x43..]
+
+  let headerBytes = take (length parts - 1) [1..] ++ [fi (0x40 + length parts)]
+
+  sequence_
+    [ writeLongPart si (so+ 32*i) h part
+    | (i,(h,part)) <- zip [0..] (reverse (zip headerBytes parts))
+    ]
+
+  -- generalize to any length of longname
+  --writeLongPart si so      0x42 p2
+  --writeLongPart si (so+32) 0x01 p1
+
+  writeEntry si (so + 32 * fi (length parts)) entry
+
+
+numRootDirInfo :: VolumeInfo -> M Int
+numRootDirInfo VolumeInfo{rootDirBegin} = loop 0 rootDirBegin 0
+  where
+    loop :: Int -> SectorIndex -> Int -> M Int
+    loop n si i = if
+      | i >= 16 -> do
+          loop n (si+1) 0
+      | otherwise -> do
+          let so = fi bytesPerDirEntry * fi i
+          DirRecord{kind} <- getDirRecord "" si so
+          case kind of
+            DRK_EndOfDir -> pure n
+            DRK_Unused -> loop (n+1) si (i+1)
+            DRK_Long -> do
+              --part <- getLongNamePart si so
+              loop (n+1) si (i+1)
+            DRK_Normal -> do
+              loop (n+1) si (i+1)
+
+{-
+_writeLongPart :: SectorIndex -> SectorOffset -> W8 -> String -> M ()
+_writeLongPart si so byte0 str = do
+  sequence_
+    [ do
+        set16 si (so+i) (fi (c2w c))
+        set16 si (so+i+1) 0
+    | (c,i) <- zip str [1,3,5,7,9, 14,16,18,20,22,24, 28,30]
+    ]
+  set8 si so byte0
+  set8 si (so+11) 0x0f
+  set8 si (so+12) 0x00
+  set8 si (so+13) 0x21
+-}
+
+writeLongPart :: SectorIndex -> SectorOffset -> W8 -> String -> M ()
+writeLongPart si so byte0 str = do
+  assert (length str <=13) $ do
+  let pad3 = [0xf,0,0xca] -- TODO:How computed?
+  let bs = byte0 : concat [ [b,0] | b <- bytesString str ] ++ [0,0] ++ repeat 0xff
+  let stream = take 11 bs ++ pad3 ++ take 12 (drop 11 bs) ++ [0,0] ++ drop 23 bs
+  writeBytes "long" 32 si so (take 32 stream)
+
+
+
+----------------------------------------------------------------------
+
+data Entry = Entry
+  { shortName8 :: String
+  , extension3 :: String
+  , attrByte :: W8
+  , time :: Time
+  , date :: Date
+  , startingCluster :: CN
+  , fileSize :: W32
+  }
+  deriving Show
+
+writeEntry :: SectorIndex -> SectorOffset -> Entry -> M ()
+writeEntry si so e = do
+  let Entry {shortName8,extension3,attrByte,time,date,startingCluster,fileSize} =e
+  writeBytes "entry" 32 si so $
+    bytesString shortName8
+    ++ bytesString extension3
+    ++ [attrByte]
+    ++ [0,0,0,0] ++ bytesString "X]X]" ++ [0,0] --10 reserved bytes???
+    ++ bytes16 (timeWord time)
+    ++ bytes16 (dateWord date)
+    ++ bytes16 (fi startingCluster)
+    ++ bytes32 fileSize
+
+
+writeBytes :: String -> Int -> SectorIndex -> SectorOffset -> [W8] -> M ()
+writeBytes _who w si so bytes = do
+  --see (who,length bytes, w)
+  assert (length bytes == w) $ do
+  sequence_ [ set8 si (so + i) b | (i,b) <- zip [0..] bytes ]
+
+bytes16 :: W16 -> [W8]
+bytes16 w = [lo,hi] where HL{lo,hi} = split16 w
+
+bytes32 :: W32 -> [W8]
+bytes32 w = bytes16 lo ++ bytes16 hi where HL{lo,hi} = split32 w
+
+bytesString :: String -> [W8]
+bytesString str = [ fi (c2w c) | c <- str ]
+
+data Date = Date
+  { year  :: Int -- (7 bits) 0..119 (1980..2099)
+  , month :: Int -- (4 bits) 1..12
+  , day   :: Int -- (5 bits) 1..31
+  }
+  deriving Show
+
+dateWord :: Date -> W16
+dateWord Date{year,month,day} =
+  (((fi year - 1980) `mod` 128) `shiftL` 9) .|.
+  ((fi month `mod` 16) `shiftL` 5) .|.
+  (fi day `mod` 32)
+
+data Time = Time
+  { hour   :: Int -- (5 bits) 0..23
+  , minute :: Int -- (6 bits) 0..59
+  , second :: Int -- (5 bits) 0..29 (two seconds)
+  }
+  deriving Show
+
+timeWord :: Time -> W16
+timeWord Time{hour,minute,second} =
+  ((fi hour `mod` 32) `shiftL` 11) .|.
+  ((fi minute `mod` 64) `shiftL` 5) .|.
+  (fi (second `div` 2) `mod` 32)
+
+
+----------------------------------------------------------------------
+
+type Vol = VolumeInfo
+
+
+writeBytesInSector :: SectorIndex -> String -> M ()
+writeBytesInSector si string = do
+  let n = length string
+  assert (n <= 256) $ do
+  let bytes :: [W8] = [ fromIntegral (c2w c) | c <- string ]
+  sequence_ [ set8 si i b | (i,b) <- zip [0..] bytes ]
   pure ()
+
+markClusterUsed :: Vol -> CN -> M ()
+markClusterUsed vol cn = do
+  let VolumeInfo{sectorsPerFat} = vol
+  (si,so) <- cn2sio vol cn
+  set16 si so 0xffff
+  set16 (si + fi sectorsPerFat) so 0xffff
+
+nextFreeCluster :: Vol -> M CN
+nextFreeCluster vol = loop (CN 3) -- 2 is always unused?
+  where
+    loop :: CN -> M CN
+    loop cn = do
+      cn' <- stepFatChain vol cn
+      if cn' /= 0
+        then loop (cn+1)
+        else pure cn
+
+
+see :: Show a => a -> M ()
+see = liftIO .print
+
+
 
 
 ----------------------------------------------------------------------
@@ -47,7 +251,7 @@ data VolumeInfo = VolumeInfo
 --  , numberReservedSectors :: W16
 --  , numberOfFats :: W8
 --  , numberOfRootEntries :: W16
---  , sectorsPerFat :: W16
+  , sectorsPerFat :: W16
 --  , sig :: W16
 --  , sectorsForRootDir :: W16
   , fatBegin :: SectorIndex
@@ -85,7 +289,7 @@ getVolumeInfo si = do
                   --, numberReservedSectors
                   --, numberOfFats
                   --, numberOfRootEntries
-                  --, sectorsPerFat
+                  , sectorsPerFat
                   --, sig
                   --, sectorsForRootDir
                   , fatBegin
@@ -183,14 +387,21 @@ getFileContents vol dr = do
 
 stepFatChain ::VolumeInfo -> CN -> M CN
 stepFatChain vol cn = do
+  (si,so) <- cn2sio vol cn
+  cn' <- CN <$> get16 si so
+  --see("stepFatChain",cn,(si,so),"-->",cn')
+  pure cn'
+
+
+cn2sio :: Vol -> CN -> M (SectorIndex,SectorOffset)
+cn2sio vol cn = do
   let VolumeInfo{fatBegin} = vol
   let bytePerChainWord :: Int = 2
   let n = bytePerChainWord * fi cn
   let si = fi (n `div` sectorSize) + fatBegin
   let so = fi (n `mod` sectorSize)
-  cn' <- CN <$> get16 si so
-  --Print ("stepFatChain",cn,"-->",cn')
-  pure cn'
+  --see ("cn2sio",cn,"->",si,so)
+  pure (si,so)
 
 siFromClusterNumber :: VolumeInfo -> CN -> SectorIndex
 siFromClusterNumber vol cn = do
@@ -233,6 +444,13 @@ get8 si so = do
   sec <- ReadSector si
   let byte = readInSector sec so
   pure byte
+
+
+set16 :: SectorIndex -> SectorOffset -> W16 -> M ()
+set16 si so w = do
+  let HL{hi,lo} = split16 w
+  set8 si so lo
+  set8 si (so+1) hi
 
 set8 :: SectorIndex -> SectorOffset -> W8 -> M ()
 set8 si so byte = do

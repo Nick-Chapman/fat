@@ -1,6 +1,6 @@
 
 module Types
-  ( W8, W16, W32, mk16, mk32, toChar
+  ( W8, W16, W32, mk16, mk32, toChar, split16, split32
   , HL(..)
   , SectorIndex
   , Sector, sectorSize, mkSector, deSector
@@ -35,6 +35,12 @@ mk32 HL{hi,lo} = W32 (fi hi * (256*256) + fi lo)
 
 mk16 :: HL W8 -> W16
 mk16 HL{hi,lo} = W16 (fi hi * 256 + fi lo)
+
+split16 :: W16 -> HL W8
+split16 w = HL { lo = fi (w `mod` 256), hi = fi (w `div` 256) }
+
+split32 :: W32 -> HL W16
+split32 w = HL { lo = fi (w `mod` (256*256)), hi = fi (w `div` (256*256)) }
 
 toChar :: W8 -> Char
 toChar (W8 w) = w2c w
