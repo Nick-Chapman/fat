@@ -12,6 +12,9 @@ cp $start $fs_image
 
 here=$(pwd)
 mount $fs
+sudo unshare --time bash -c 'date -s "1997-12-29 12:25:02"' > /dev/null
+# The date set above for the separate time domain strangley persists
+# when running the script
 (cd $fs; . $here/$script)
 sleep 0
 umount -l $fs

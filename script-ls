@@ -1,2 +1,3 @@
+ls -al
 #ls -al --time-style=full-iso
-stat *
+#stat *

@@ -25,20 +25,18 @@ xy.image: run-script-on-image.sh empty.image script-xy
   ./$in1 $in2 script-xy $out
 
 # h-prefix: the image created by my haskell fat16 code
-hxy.image : src/fat.exe empty.image
+h-xy.image : src/fat.exe empty.image script-xy
   cp $in2 $in2.writable
   chmod +w $in2.writable
-  ./$in1 $in2.writable -m xxx file1 > /dev/null
-  ./$in1 $in2.writable -m yyy file2 > /dev/null
-  ./$in1 $in2.writable -m zzz file3 > /dev/null
+  cat script-xy | ./$in1 $in2.writable -i > /dev/null
   cp $in2.writable $out
 
 xy.image.hd : xy.image
   hd -v $in | head -20000 > $out
 
-hxy.image.hd : hxy.image
+h-xy.image.hd : h-xy.image
   hd -v $in | head -20000 > $out
 
-*test-xy.diff : xy.image.hd hxy.image.hd
+*test-xy.diff : xy.image.hd h-xy.image.hd
   diff $in1 $in2
   #git diff --word-diff=color $in1 $in2
