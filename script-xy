@@ -1,2 +1,3 @@
-echo xxx > aaaaaaaaaaaaa
-#echo yyy > bbbbbbbbbbbbb
+echo xxx > file1
+#echo yyy > file2
+#echo zzz > file3

@@ -24,13 +24,15 @@ test1.out : src/fat.exe small.image
 xy.image: run-script-on-image.sh empty.image script-xy
   ./$in1 $in2 script-xy $out
 
-jxy.image : src/fat.exe empty.image
+# h-prefix: the image created by my haskell fat16 code
+hxy.image : src/fat.exe empty.image
   cp $in2 $in2.writable
   chmod +w $in2.writable
-  ./$in1 $in2.writable -m xxx aaaaaaaaaaaaa
-  #./$in1 $in2.writable -m yyy bbbbbbbbbbbbb
+  ./$in1 $in2.writable -m xxx file1
+  #./$in1 $in2.writable -m yyy file2
+  #./$in1 $in2.writable -m zzz file3
   cp $in2.writable $out
 
-*xy.diff : xy.image jxy.image diff-images.sh
+*xy.diff : xy.image hxy.image diff-images.sh
   ./diff-images.sh $in1 $in2
 

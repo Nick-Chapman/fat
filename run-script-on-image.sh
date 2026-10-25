@@ -14,6 +14,6 @@ here=$(pwd)
 mount $fs
 (cd $fs; . $here/$script)
 sleep 0
-umount $fs
+umount -l $fs
 
 cp $fs_image $final

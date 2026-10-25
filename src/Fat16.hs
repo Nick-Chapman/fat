@@ -14,7 +14,7 @@ module Fat16
 import TheDisk (M (ReadSector,WriteSector))
 import Control.Exception (assert)
 import Control.Monad.IO.Class (liftIO)
-import Data.Bits ((.&.),(.|.),shiftL)
+import Data.Bits ((.&.),(.|.),shiftL,rotateR)
 import Prelude hiding (interact)
 import Types
 import Data.ByteString.Internal (c2w)
@@ -61,8 +61,6 @@ echoRedirect vol contents longName = do -- echo contents > longName
   let fileSize = fi (length contents)
   let entry = Entry { shortName8, extension3, attrByte, time, date, startingCluster, fileSize}
 
-  --see entry
-
   let
     chop :: String -> [String]
     chop s =
@@ -71,22 +69,23 @@ echoRedirect vol contents longName = do -- echo contents > longName
 
   let parts = chop longName
 
-  --let headerBytes = [0x41..] --0x01 : [0x42..]
-  --let headerBytes = 0x01 : 0x02 : [0x43..]
-
   let headerBytes = take (length parts - 1) [1..] ++ [fi (0x40 + length parts)]
 
+
+  let shortName = shortName8 ++ extension3
+  let checkSum :: W8 = foldl f 0 shortName
+        where
+          f :: W8 -> Char -> W8
+          f acc c = acc `rotateR` 1 + fi (c2w c)
+
+  see (shortName, "checkSum:",checkSum)
+
   sequence_
-    [ writeLongPart si (so+ 32*i) h part
+    [ writeLongPart si (so+ 32*i) h part checkSum
     | (i,(h,part)) <- zip [0..] (reverse (zip headerBytes parts))
     ]
 
-  -- generalize to any length of longname
-  --writeLongPart si so      0x42 p2
-  --writeLongPart si (so+32) 0x01 p1
-
   writeEntry si (so + 32 * fi (length parts)) entry
-
 
 numRootDirInfo :: VolumeInfo -> M Int
 numRootDirInfo VolumeInfo{rootDirBegin} = loop 0 rootDirBegin 0
@@ -107,32 +106,16 @@ numRootDirInfo VolumeInfo{rootDirBegin} = loop 0 rootDirBegin 0
             DRK_Normal -> do
               loop (n+1) si (i+1)
 
-{-
-_writeLongPart :: SectorIndex -> SectorOffset -> W8 -> String -> M ()
-_writeLongPart si so byte0 str = do
-  sequence_
-    [ do
-        set16 si (so+i) (fi (c2w c))
-        set16 si (so+i+1) 0
-    | (c,i) <- zip str [1,3,5,7,9, 14,16,18,20,22,24, 28,30]
-    ]
-  set8 si so byte0
-  set8 si (so+11) 0x0f
-  set8 si (so+12) 0x00
-  set8 si (so+13) 0x21
--}
 
-writeLongPart :: SectorIndex -> SectorOffset -> W8 -> String -> M ()
-writeLongPart si so byte0 str = do
+writeLongPart :: SectorIndex -> SectorOffset -> W8 -> String -> W8 -> M ()
+writeLongPart si so byte0 str checkSum = do
   assert (length str <=13) $ do
-  let pad3 = [0xf,0,0xca] -- TODO:How computed?
+  let pad3 = [0xf,0,checkSum]
   let bs = byte0 : concat [ [b,0] | b <- bytesString str ] ++ [0,0] ++ repeat 0xff
   let stream = take 11 bs ++ pad3 ++ take 12 (drop 11 bs) ++ [0,0] ++ drop 23 bs
   writeBytes "long" 32 si so (take 32 stream)
 
 
-
-----------------------------------------------------------------------
 
 data Entry = Entry
   { shortName8 :: String
