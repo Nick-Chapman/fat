@@ -1,17 +1,36 @@
 
-small.image: make-image.sh script-small create-empty-fat.sh
-  ./$in1 $in2 $out >/dev/null
+expect.names :
+  echo test1.out >> $out
 
-big.image: make-image.sh script-big create-empty-fat.sh
-  ./$in1 $in2 $out > /dev/null
+include ~/code/jenga/rulelib/expect.jenga
 
+empty.image: create-empty-fat.sh
+  ./$in1 $out >/dev/null
+
+# big: use for interacting with
+big.image: run-script-on-image.sh empty.image script-big
+  ./$in1 $in2 script-big $out
+
+# small: used for test1 (read-ops)
+small.image: run-script-on-image.sh empty.image script-small
+  ./$in1 $in2 script-small $out
 
 test1.out : src/fat.exe small.image
   cp $in2 $in2.writable
   chmod +w $in2.writable
   ./$in1 $in2.writable > $out
 
-expect.names :
-  echo test1.out >> $out
+# xy: use for diffing write ops
+xy.image: run-script-on-image.sh empty.image script-xy
+  ./$in1 $in2 script-xy $out
 
-include ~/code/jenga/rulelib/expect.jenga
+jxy.image : src/fat.exe empty.image
+  cp $in2 $in2.writable
+  chmod +w $in2.writable
+  ./$in1 $in2.writable -m xxx aaaaaaaaaaaaa
+  #./$in1 $in2.writable -m yyy bbbbbbbbbbbbb
+  cp $in2.writable $out
+
+*xy.diff : xy.image jxy.image diff-images.sh
+  ./diff-images.sh $in1 $in2
+
