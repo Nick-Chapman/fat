@@ -39,7 +39,6 @@ echoRedirect vol contents longName = do -- echo contents > longName
   --see ("next free cluster",cn)
   --see ("@ sector index",si)
 
-  set8 si 3 0x0a
   assert (length contents < 256) $ do
   writeBytesInSector si contents
 
