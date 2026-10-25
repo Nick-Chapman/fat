@@ -2,11 +2,10 @@
 echo xxx > file1
 echo yyy > file222-with-a-big-name
 
-echo x > file3
-echo x > file4
+echo x > file3-lljkhlkjhlkjhlkjhlkjhoiopjhtfgyhjhgkjhgkjhkkjhgkjhgkjhgkjhgk
 echo x > file5
 echo x > file6
-echo x > file7
 
-# Stopped working
-#echo x > file8
+echo x > file7
+echo x > file8-kjhgkjhhkjhhhjkjhjk
+echo x > file9
