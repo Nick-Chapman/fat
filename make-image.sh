@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Make a sample filesystem image to decode
+./create-empty-fat.sh empty.image
 
 here=$(pwd)
 
@@ -10,9 +10,7 @@ result=$2
 image=/tmp/fat.image
 fs=/mnt/play
 
-dd if=/dev/zero of=$image bs=512 count=40000 2>&1
-/sbin/mkfs.vfat -s 1 -F 16 $image 2>&1
-file $image
+cp empty.image $image
 
 mount $fs
 (

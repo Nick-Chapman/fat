@@ -1,24 +1,17 @@
 
-fat16.image: make-image.sh script1
+small.image: make-image.sh script-small create-empty-fat.sh
   ./$in1 $in2 $out >/dev/null
 
-interact.image: make-image.sh script-interact
+big.image: make-image.sh script-big create-empty-fat.sh
   ./$in1 $in2 $out > /dev/null
 
 
-*top16: src/fat.exe fat16.image
-  ./$in1 $in2
-
-*interact: src/fat.exe interact.image
-  ./$in -i $in2
-
-
-example16.out : src/fat.exe fat16.image
+test1.out : src/fat.exe small.image
   cp $in2 $in2.writable
   chmod +w $in2.writable
   ./$in1 $in2.writable > $out
 
 expect.names :
-  echo example16.out >> $out
+  echo test1.out >> $out
 
 include ~/code/jenga/rulelib/expect.jenga
