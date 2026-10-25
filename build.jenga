@@ -20,7 +20,7 @@ test1.out : src/fat.exe small.image
   chmod +w $in2.writable
   ./$in1 $in2.writable > $out
 
-# xy: use for diffing write ops
+# xy: use for xy-diff test (write ops)
 xy.image: run-script-on-image.sh empty.image script-xy
   ./$in1 $in2 script-xy $out
 
@@ -28,11 +28,17 @@ xy.image: run-script-on-image.sh empty.image script-xy
 hxy.image : src/fat.exe empty.image
   cp $in2 $in2.writable
   chmod +w $in2.writable
-  ./$in1 $in2.writable -m xxx file1
-  #./$in1 $in2.writable -m yyy file2
-  #./$in1 $in2.writable -m zzz file3
+  ./$in1 $in2.writable -m xxx file1 > /dev/null
+  ./$in1 $in2.writable -m yyy file2 > /dev/null
+  ./$in1 $in2.writable -m zzz file3 > /dev/null
   cp $in2.writable $out
 
-*xy.diff : xy.image hxy.image diff-images.sh
-  ./diff-images.sh $in1 $in2
+xy.image.hd : xy.image
+  hd -v $in | head -20000 > $out
 
+hxy.image.hd : hxy.image
+  hd -v $in | head -20000 > $out
+
+*test-xy.diff : xy.image.hd hxy.image.hd
+  diff $in1 $in2
+  #git diff --word-diff=color $in1 $in2

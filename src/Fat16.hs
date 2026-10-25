@@ -26,11 +26,11 @@ import Data.Char (toUpper)
 echoRedirect :: Vol -> String -> String -> M ()
 echoRedirect vol contents longName = do -- echo contents > longName
 
-  see (longName,contents)
+  --see (longName,contents)
 
   n <- numRootDirInfo vol
   let so :: SectorOffset = fi (32*n)
-  see (n,so)
+  --see (n,so)
 
   cn <- nextFreeCluster vol
   markClusterUsed vol cn
@@ -55,11 +55,19 @@ echoRedirect vol contents longName = do -- echo contents > longName
   let extension3 = "   " -- TODO: split longname on dot
 
   let attrByte = 0x20 -- archive flag
-  let date = Date { year = 2026, month = 10, day = 24 }
-  let time = Time { hour = 17, minute = 35, second = 0 }
+  let date = Date { year = 1997, month = 12, day = 29 }
+  let time = Time { hour = 12, minute = 25, second = 02 }
   let startingCluster = cn
   let fileSize = fi (length contents)
-  let entry = Entry { shortName8, extension3, attrByte, time, date, startingCluster, fileSize}
+  let entry =
+        Entry { shortName8, extension3, attrByte
+              , bdate = date
+              , btime = time
+              , adate = date
+              , mtime = time
+              , mdate = date
+              , startingCluster, fileSize
+              }
 
   let
     chop :: String -> [String]
@@ -78,7 +86,7 @@ echoRedirect vol contents longName = do -- echo contents > longName
           f :: W8 -> Char -> W8
           f acc c = acc `rotateR` 1 + fi (c2w c)
 
-  see (shortName, "checkSum:",checkSum)
+  --see (shortName, "checkSum:",checkSum)
 
   sequence_
     [ writeLongPart si (so+ 32*i) h part checkSum
@@ -121,8 +129,11 @@ data Entry = Entry
   { shortName8 :: String
   , extension3 :: String
   , attrByte :: W8
-  , time :: Time
-  , date :: Date
+  , bdate :: Date -- birth
+  , btime :: Time -- birth
+  , adate :: Date -- access
+  , mtime :: Time -- mod
+  , mdate :: Date -- mod
   , startingCluster :: CN
   , fileSize :: W32
   }
@@ -130,14 +141,19 @@ data Entry = Entry
 
 writeEntry :: SectorIndex -> SectorOffset -> Entry -> M ()
 writeEntry si so e = do
-  let Entry {shortName8,extension3,attrByte,time,date,startingCluster,fileSize} =e
+  let Entry {shortName8,extension3,attrByte,btime,bdate,adate,mtime,mdate,startingCluster,fileSize} = e
   writeBytes "entry" 32 si so $
     bytesString shortName8
     ++ bytesString extension3
     ++ [attrByte]
-    ++ [0,0,0,0] ++ bytesString "X]X]" ++ [0,0] --10 reserved bytes???
-    ++ bytes16 (timeWord time)
-    ++ bytes16 (dateWord date)
+    ++ [0] -- reserved for NT
+    ++ [0] -- birth 1/100s of a second
+    ++ bytes16 (timeWord btime)
+    ++ bytes16 (dateWord bdate)
+    ++ bytes16 (dateWord adate)
+    ++ [0,0] -- high 16bits of cluster number; always 0 for FAT-16
+    ++ bytes16 (timeWord mtime)
+    ++ bytes16 (dateWord mdate)
     ++ bytes16 (fi startingCluster)
     ++ bytes32 fileSize
 
@@ -215,10 +231,8 @@ nextFreeCluster vol = loop (CN 3) -- 2 is always unused?
         else pure cn
 
 
-see :: Show a => a -> M ()
-see = liftIO .print
-
-
+_see :: Show a => a -> M ()
+_see = liftIO .print
 
 
 ----------------------------------------------------------------------
