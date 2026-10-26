@@ -75,6 +75,7 @@ data Com
   | EchoRedirect String Name
   | Touch Name
   | CopyIn FilePath Name
+  | Mkdir Name
 
 data ParseRes = Command Com | FailedToParse | ExitCommand
 
@@ -91,6 +92,7 @@ parseCom s =
     ["echo",s,">",name] -> Command (EchoRedirect s name)
     ["touch",name] -> Command (Touch name)
     ["cp",path@('/':_),name] -> Command (CopyIn path name)
+    ["mkdir",name] -> Command (Mkdir name)
     _ -> FailedToParse
 
 type Vol = VolumeInfo
@@ -119,15 +121,18 @@ execCom vol state@State{cwd} = \case
     lookupSubDir vol cwd name >>= \case
       Nothing -> pure state
       Just dir -> pure state { cwd = dir }
-  EchoRedirect contents longName -> do
-    echoRedirect vol (contents++"\n") longName
+  EchoRedirect contents name -> do
+    echoRedirect vol (contents++"\n") name
     pure state
-  Touch longName -> do
-    touch vol longName
+  Touch name -> do
+    touch vol name
     pure state
-  CopyIn path longName -> do
+  CopyIn path name -> do
     contents <- liftIO $ readFile path
-    echoRedirect vol contents longName
+    echoRedirect vol contents name
+    pure state
+  Mkdir name -> do
+    mkDir vol name
     pure state
 
 data Dir = Root | Sub CN

@@ -10,6 +10,7 @@ module Fat16
 
   , touch
   , echoRedirect
+  , mkDir
   ) where
 
 import TheDisk (M (ReadSector,WriteSector))
@@ -23,22 +24,55 @@ import Data.Char (toUpper)
 
 ----------------------------------------------------------------------
 
+touch :: Vol -> String -> M ()
+touch vol longName = do
+  let cn = 0
+  let entry = makeStandardEntry cn longName (FileOfSize 0)
+  let bytes = encodeEntry entry
+  writeRootDirEntry vol bytes
+
 echoRedirect :: Vol -> String -> String -> M ()
 echoRedirect vol contents longName = do
   cn <- nextFreeCluster vol
   writeBytesInClusterChain vol cn (bytesString contents)
   let fileSize = fi (length contents)
-  let entry = makeStandardEntry cn longName fileSize
+  let entry = makeStandardEntry cn longName (FileOfSize fileSize)
   let bytes = encodeEntry entry
   writeRootDirEntry vol bytes
 
-touch :: Vol -> String -> M ()
-touch vol longName = do
-  let cn = 0
+mkDir :: Vol -> String -> M ()
+mkDir vol longName = do
+  cn <- nextFreeCluster vol
+  writeBytesInClusterChain vol cn (emptyDirBytes cn)
+  let entry = makeStandardEntry cn longName Subdir
+  writeRootDirEntry vol $ encodeEntry entry
+
+emptyDirBytes :: CN -> [W8]
+emptyDirBytes cn =
+  (encodeStandardEntry $ makeDotEntry cn ".") ++
+  (encodeStandardEntry $ makeDotEntry 0 "..")
+
+makeDotEntry :: CN -> String -> StandardEntry -- TODO: merge with makeStandardEntry
+makeDotEntry cn name = do
   let fileSize = 0
-  let entry = makeStandardEntry cn longName fileSize
-  let bytes = encodeEntry entry
-  writeRootDirEntry vol bytes
+  let attrByte = 0x10
+  let shortName8 = take 8 (name ++ repeat ' ')
+  let extension3 = "   "
+  let date = Date { year = 1997, month = 12, day = 29 }
+  let time = Time { hour = 12, minute = 25, second = 02 }
+  let startingCluster = cn
+  StandardEntry { longName = name
+                , shortName8
+                , extension3
+                , attrByte
+                , bdate = date
+                , btime = time
+                , adate = date
+                , mtime = time
+                , mdate = date
+                , startingCluster
+                , fileSize
+                }
 
 ----------------------------------------------------------------------
 -- FAT
@@ -144,7 +178,7 @@ encodeLongPart byte0 str checkSum = do
   take 32 stream
 
 data StandardEntry = StandardEntry
-  { longName :: String
+  { longName :: String -- TODO: remove from here?
   , shortName8 :: String
   , extension3 :: String
   , attrByte :: W8
@@ -158,12 +192,16 @@ data StandardEntry = StandardEntry
   }
   deriving Show
 
-makeStandardEntry :: CN -> String -> W32 -> StandardEntry
-makeStandardEntry cn longName fileSize = do
+data Thing = FileOfSize W32 | Subdir
+
+makeStandardEntry :: CN -> String -> Thing -> StandardEntry
+makeStandardEntry cn longName thing = do
+  let (fileSize,attrByte) = case thing of
+        FileOfSize n -> (n, 0x20)
+        Subdir -> (0, 0x10)
   let max8 s = if length s > 8 then take 6 s ++ "~1" else take 8 (s ++ repeat ' ')
   let shortName8 = max8 (map toUpper longName)
   let extension3 = "   " -- TODO: split longname on dot
-  let attrByte = 0x20 -- archive flag
   let date = Date { year = 1997, month = 12, day = 29 }
   let time = Time { hour = 12, minute = 25, second = 02 }
   let startingCluster = cn

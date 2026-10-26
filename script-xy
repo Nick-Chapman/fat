@@ -1,5 +1,6 @@
 
 echo q > f1
+mkdir sub
 echo q > f2
 
 
@@ -44,3 +45,6 @@ cp /home/nic/code/quarter-forth/README.md rrr
 
 # Stress with a really big file...
 #cp /home/nic/code/wordle/legal.sorted legal
+
+# Subdirectories...
+mkdir anotherSubDir
