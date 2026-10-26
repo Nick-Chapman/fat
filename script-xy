@@ -14,3 +14,8 @@ echo '' > file10
 touch fileX
 
 echo data > fileY
+
+# copy in a file
+cp /home/nic/code/quarter-forth/z.list z-list
+
+# TODO: Make longNames with "." work corectly

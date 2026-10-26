@@ -65,7 +65,14 @@ interact path = do
 
     loop state0
 
-data Com = Null | Ls | Cat Name | Cd Name | EchoRedirect String Name | Touch Name
+data Com
+  = Null
+  | Ls
+  | Cat Name
+  | Cd Name
+  | EchoRedirect String Name
+  | Touch Name
+  | CopyIn FilePath Name
 
 parseCom :: String -> Maybe Com
 parseCom s =
@@ -78,6 +85,7 @@ parseCom s =
     ["echo","''",">",name] -> Just (EchoRedirect "" name)
     ["echo",s,">",name] -> Just (EchoRedirect s name)
     ["touch",name] -> Just (Touch name)
+    ["cp",path@('/':_),name] -> Just (CopyIn path name)
     _ -> Nothing
 
 type Vol = VolumeInfo
@@ -111,6 +119,10 @@ execCom vol state@State{cwd} = \case
     pure state
   Touch longName -> do
     touch vol longName
+    pure state
+  CopyIn path longName -> do
+    contents <- liftIO $ readFile path
+    echoRedirect vol contents longName
     pure state
 
 data Dir = Root | Sub CN
