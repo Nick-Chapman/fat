@@ -25,14 +25,15 @@ data Cache = Cache
   { theSI:: SectorIndex
   , theSec :: Sector
   , hitsR :: Int
-  , hitsW :: Int
+  , batchedW :: Int
+  , dirty :: Bool
   }
 
 initCache :: Disk.M Cache
 initCache = do
   let theSI = -1
   let theSec = undefined
-  pure Cache { theSI, theSec, hitsR = 0, hitsW = 0 }
+  pure Cache { theSI, theSec, hitsR = 0, batchedW = 0, dirty = False }
 
 exec :: forall a. FilePath -> M a -> IO a
 exec path m0 = Disk.exec path do
@@ -40,8 +41,9 @@ exec path m0 = Disk.exec path do
   res <- loop s0 m0 k0
   pure res
   where
-    k0 Cache{hitsR,hitsW} a = do
-      liftIO (printf "[#hitsR=%d,hitsW=%d]\n" hitsR hitsW)
+    k0 c@Cache{hitsR,batchedW} a = do
+      flushCache c
+      liftIO (printf "[#hitsR=%d,batchedW=%d]\n" hitsR batchedW)
       pure a
     loop :: forall a b. Cache -> M a -> (Cache -> a -> Disk.M b) -> Disk.M b
     loop c = \case
@@ -55,22 +57,26 @@ exec path m0 = Disk.exec path do
         c <- writeSector c si sec
         k c ()
 
-cachingEnabled :: Bool
-cachingEnabled = True
+flushCache :: Cache -> Disk.M ()
+flushCache Cache{theSI,theSec,dirty} = if
+  | dirty -> do
+      Disk.WriteSector theSI theSec
+  | otherwise -> do
+      pure ()
 
 writeSector :: Cache -> SectorIndex -> Sector -> Disk.M Cache
-writeSector c@Cache{theSI} si sec = do
-  Disk.WriteSector si sec -- TODO: delay write to disk (and tick hitsW)
-  if
-    | cachingEnabled && si == theSI -> do
-        pure c { theSec = sec }
-    | otherwise -> do
-        pure c
+writeSector c@Cache{theSI,batchedW} si sec = if
+  | si == theSI -> do
+      pure c { theSec = sec, dirty = True,  batchedW = 1 + batchedW }
+  | otherwise -> do
+      flushCache c
+      pure c { theSec = sec, dirty = False }
 
 readSector :: Cache -> SectorIndex -> Disk.M (Sector, Cache)
 readSector c@Cache{theSI,theSec,hitsR} si = if
-  | cachingEnabled && si == theSI -> do
+  | si == theSI -> do
       pure (theSec, c { hitsR = 1 + hitsR })
   | otherwise -> do
+      flushCache c
       sec <- Disk.ReadSector si
-      pure (sec, c { theSI = si, theSec = sec })
+      pure (sec, c { theSI = si, theSec = sec, dirty = False })

@@ -28,5 +28,5 @@
 /d : "x\n"
 /e : "x\n"
 /empty : ""
-[#hitsR=2440,hitsW=0]
+[#hitsR=2440,batchedW=0]
 [#reads=39, #writes=0]

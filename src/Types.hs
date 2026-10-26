@@ -54,7 +54,7 @@ newtype SectorOffset = SectorOffset W16 -- TODO: actually only need 9 bits
 sectorSize :: Int
 sectorSize = 512
 
-newtype Sector = Sector [W8]
+newtype Sector = Sector [W8] -- TODO: Use mutable array representation
 
 mkSector :: B.ByteString -> Sector
 mkSector bs = Sector (map fromIntegral (B.unpack bs))

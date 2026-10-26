@@ -385,11 +385,13 @@ getFileContents vol dr = do
           pure (start ++ rest)
   loop firstCluster (fi fileSize)
 
+-- This become a big performace drain as the disk fill up.
+-- TOOO: support some kind of FAT caching
 stepFatChain ::VolumeInfo -> CN -> M CN
 stepFatChain vol cn = do
   (si,so) <- cn2sio vol cn
   cn' <- CN <$> get16 si so
-  --see("stepFatChain",cn,(si,so),"-->",cn')
+  -- _see("stepFatChain",cn,(si,so),"-->",cn')
   pure cn'
 
 
