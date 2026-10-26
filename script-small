@@ -29,6 +29,8 @@ echo 'sub2file' > sub/sub2/deep
 echo 'x' > d
 echo 'x' > e
 
+touch empty
+
 echo 'a' > sub/thing2
 echo 'b' > sub/thing3
 echo 'c' > sub/thing4

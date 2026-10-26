@@ -8,6 +8,7 @@ final=$3
 fs_image=/tmp/fat.image
 fs=/mnt/play
 
+rm -f $fs_image
 cp $start $fs_image
 
 here=$(pwd)

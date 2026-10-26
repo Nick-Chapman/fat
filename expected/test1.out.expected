@@ -27,4 +27,5 @@
 /sub/thing17 : "p\n"
 /d : "x\n"
 /e : "x\n"
-[#reads=2428]
+/empty : ""
+[#reads=2479]

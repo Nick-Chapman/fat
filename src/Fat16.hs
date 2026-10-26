@@ -8,6 +8,7 @@ module Fat16
   , getDirInfo
   , getFileContents
 
+  , touch
   , echoRedirect
   ) where
 
@@ -28,6 +29,16 @@ echoRedirect vol contents longName = do
   markClusterUsed vol cn
   createContents vol cn contents
   let fileSize = fi (length contents)
+  let entry = makeStandardEntry cn longName fileSize
+  let bytes = encodeEntry entry
+  writeRootDirEntry vol bytes
+
+touch :: Vol -> String -> M ()
+touch vol longName = do
+  --cn <- nextFreeCluster vol
+  --markClusterUsed vol cn
+  let cn = 0
+  let fileSize = 0
   let entry = makeStandardEntry cn longName fileSize
   let bytes = encodeEntry entry
   writeRootDirEntry vol bytes

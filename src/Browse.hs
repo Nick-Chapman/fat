@@ -76,12 +76,14 @@ parseCom s =
     ["ls"] -> Just Ls
     ["cd",name] -> Just (Cd name)
     ["cat",name] -> Just (Cat name)
+    ["echo","''",">",name] -> Just (EchoRedirect "" name)
     ["echo",s,">",name] -> Just (EchoRedirect s name)
+    ["touch",name] -> Just (Touch name)
     _ -> Nothing
 
 type Vol = VolumeInfo
 
-data Com = Ls | Cat Name | Cd Name | EchoRedirect String Name
+data Com = Ls | Cat Name | Cd Name | EchoRedirect String Name | Touch Name
 
 type Name = String
 
@@ -107,6 +109,9 @@ execCom vol state@State{cwd} = \case
       Just dir -> pure state { cwd = dir }
   EchoRedirect contents longName -> do
     echoRedirect vol (contents++"\n") longName
+    pure state
+  Touch longName -> do
+    touch vol longName
     pure state
 
 data Dir = Root | Sub CN
