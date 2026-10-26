@@ -28,7 +28,7 @@ touch :: Vol -> String -> M ()
 touch vol longName = do
   let cn = 0
   let entry = makeStandardEntry cn longName (FileOfSize 0)
-  let bytes = encodeEntry entry
+  let bytes = encodeEntry longName entry
   writeRootDirEntry vol bytes
 
 echoRedirect :: Vol -> String -> String -> M ()
@@ -37,7 +37,7 @@ echoRedirect vol contents longName = do
   writeBytesInClusterChain vol cn (bytesString contents)
   let fileSize = fi (length contents)
   let entry = makeStandardEntry cn longName (FileOfSize fileSize)
-  let bytes = encodeEntry entry
+  let bytes = encodeEntry longName entry
   writeRootDirEntry vol bytes
 
 mkDir :: Vol -> String -> M ()
@@ -45,34 +45,12 @@ mkDir vol longName = do
   cn <- nextFreeCluster vol
   writeBytesInClusterChain vol cn (emptyDirBytes cn)
   let entry = makeStandardEntry cn longName Subdir
-  writeRootDirEntry vol $ encodeEntry entry
+  writeRootDirEntry vol $ encodeEntry longName entry
 
 emptyDirBytes :: CN -> [W8]
 emptyDirBytes cn =
-  (encodeStandardEntry $ makeDotEntry cn ".") ++
-  (encodeStandardEntry $ makeDotEntry 0 "..")
-
-makeDotEntry :: CN -> String -> StandardEntry -- TODO: merge with makeStandardEntry
-makeDotEntry cn name = do
-  let fileSize = 0
-  let attrByte = 0x10
-  let shortName8 = take 8 (name ++ repeat ' ')
-  let extension3 = "   "
-  let date = Date { year = 1997, month = 12, day = 29 }
-  let time = Time { hour = 12, minute = 25, second = 02 }
-  let startingCluster = cn
-  StandardEntry { longName = name
-                , shortName8
-                , extension3
-                , attrByte
-                , bdate = date
-                , btime = time
-                , adate = date
-                , mtime = time
-                , mdate = date
-                , startingCluster
-                , fileSize
-                }
+  (encodeStandardEntry $ makeStandardEntry cn "." Subdir) ++
+  (encodeStandardEntry $ makeStandardEntry 0 ".." Subdir)
 
 ----------------------------------------------------------------------
 -- FAT
@@ -151,12 +129,11 @@ findRootDirNextEntry VolumeInfo{rootDirBegin} = loop rootDirBegin 0
 ----------------------------------------------------------------------
 -- DIRECTORY encode
 
-encodeEntry :: StandardEntry -> [W8]
-encodeEntry entry = do
-  let StandardEntry{longName,shortName8,extension3} = entry
+encodeEntry :: String -> StandardEntry -> [W8]
+encodeEntry longName entry = do
+  let StandardEntry{shortName} = entry
   let chop = \case [] -> []; str -> let (h,t) = splitAt 13 str in h : chop t
   let parts = chop longName
-  let shortName = shortName8 ++ extension3
   encodeLongNameEnties shortName parts ++ encodeStandardEntry entry
 
 encodeLongNameEnties :: String -> [String] -> [W8]
@@ -178,9 +155,7 @@ encodeLongPart byte0 str checkSum = do
   take 32 stream
 
 data StandardEntry = StandardEntry
-  { longName :: String -- TODO: remove from here?
-  , shortName8 :: String
-  , extension3 :: String
+  { shortName :: String
   , attrByte :: W8
   , bdate :: Date -- birth
   , btime :: Time -- birth
@@ -202,12 +177,11 @@ makeStandardEntry cn longName thing = do
   let max8 s = if length s > 8 then take 6 s ++ "~1" else take 8 (s ++ repeat ' ')
   let shortName8 = max8 (map toUpper longName)
   let extension3 = "   " -- TODO: split longname on dot
+  let shortName = shortName8 ++ extension3
   let date = Date { year = 1997, month = 12, day = 29 }
   let time = Time { hour = 12, minute = 25, second = 02 }
   let startingCluster = cn
-  StandardEntry { longName
-                , shortName8
-                , extension3
+  StandardEntry { shortName
                 , attrByte
                 , bdate = date
                 , btime = time
@@ -220,9 +194,8 @@ makeStandardEntry cn longName thing = do
 
 encodeStandardEntry :: StandardEntry -> [W8]
 encodeStandardEntry e = do
-  let StandardEntry {shortName8,extension3,attrByte,btime,bdate,adate,mtime,mdate,startingCluster,fileSize} = e
-  bytesString shortName8
-    ++ bytesString extension3
+  let StandardEntry {shortName,attrByte,btime,bdate,adate,mtime,mdate,startingCluster,fileSize} = e
+  bytesString shortName
     ++ [attrByte]
     ++ [0] -- reserved for NT
     ++ [0] -- birth 1/100s of a second
@@ -286,12 +259,7 @@ bytesPerDirEntry = 32
 
 data VolumeInfo = VolumeInfo
   { sectorsPerCluster :: W8
---  , numberReservedSectors :: W16
---  , numberOfFats :: W8
---  , numberOfRootEntries :: W16
   , sectorsPerFat :: W16
---  , sig :: W16
---  , sectorsForRootDir :: W16
   , fatBegin :: SectorIndex
   , rootDirBegin :: SectorIndex
   , clusterBegin :: SectorIndex
@@ -309,9 +277,9 @@ getVolumeInfo si = do
   sig <- get16 si 0x1FE
 
   assert (fi bytesPerSector == sectorSize) $ do
-  --assert (sectorsPerCluster == 1) $ do
+  assert (sectorsPerCluster == 1) $ do
   assert (numberOfFats == 2) $ do
-  --assert (numberReservedSectors == 1) $ do
+  assert (numberReservedSectors == 1) $ do
   assert (sig == 0xAA55) $ do
 
   let numberOfDirEntriesPerSector = fi (sectorSize `div` bytesPerDirEntry)
@@ -324,12 +292,7 @@ getVolumeInfo si = do
   let clusterBegin = rootDirBegin + fi sectorsForRootDir
 
   pure VolumeInfo { sectorsPerCluster
-                  --, numberReservedSectors
-                  --, numberOfFats
-                  --, numberOfRootEntries
                   , sectorsPerFat
-                  --, sig
-                  --, sectorsForRootDir
                   , fatBegin
                   , rootDirBegin
                   , clusterBegin
