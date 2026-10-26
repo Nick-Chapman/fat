@@ -1,4 +1,4 @@
-module Browse (dump,interact,devMut) where
+module Browse (dump,interact) where
 
 import Control.Monad.IO.Class (liftIO)
 import FileTree (Tree(..),Entry(..),printTree)
@@ -8,11 +8,6 @@ import System.Console.Haskeline qualified as HL
 import Text.Printf (printf)
 import TheDisk (M,exec)
 import Fat16
-
-devMut :: FilePath -> String -> String -> IO ()
-devMut path contents longName = exec path $ do
-  vol <- getVolumeInfo 0
-  echoRedirect vol (contents++"\n") longName
 
 dump :: FilePath -> IO ()
 dump path = exec path $ do

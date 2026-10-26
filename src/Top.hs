@@ -1,6 +1,6 @@
 module Top (main) where
 
-import Browse qualified (dump,interact,devMut)
+import Browse qualified (dump,interact)
 import System.Environment (getArgs)
 import Text.Printf (printf)
 
@@ -11,14 +11,13 @@ main = do
   case mode of
     Dump -> Browse.dump imageFile
     Interact -> Browse.interact imageFile
-    DevMut contents longName -> Browse.devMut imageFile contents longName
 
 data Config = Config
   { imageFile :: FilePath
   , mode :: Mode
   }
 
-data Mode = Dump | Interact | DevMut String String
+data Mode = Dump | Interact
 
 parseConfig :: [String] -> Config
 parseConfig = loop config0
@@ -31,6 +30,5 @@ parseConfig = loop config0
     loop acc = \case
       [] -> acc
       "-i":rest -> loop acc { mode = Interact } rest
-      "-m":contents:longName:rest -> loop acc { mode = DevMut contents longName } rest
       flag@('-':_):_ -> error (printf "unknown flag: %s" flag)
       imageFile:rest -> loop acc { imageFile } rest
