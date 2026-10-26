@@ -56,10 +56,12 @@ interact path = do
           Nothing -> pure ()
           Just line -> do
             case parseCom line of
-              Nothing -> do
+              FailedToParse -> do
                 errM (printf "syntax error: '%s'" line)
                 loop state
-              Just com -> do
+              ExitCommand -> do
+                pure ()
+              Command com -> do
                 state <- execCom vol state com
                 loop state
 
@@ -74,19 +76,22 @@ data Com
   | Touch Name
   | CopyIn FilePath Name
 
-parseCom :: String -> Maybe Com
+data ParseRes = Command Com | FailedToParse | ExitCommand
+
+parseCom :: String -> ParseRes
 parseCom s =
   case words s of
-    [] -> Just Null
-    ('#':_):_ -> Just Null
-    ["ls"] -> Just Ls
-    ["cd",name] -> Just (Cd name)
-    ["cat",name] -> Just (Cat name)
-    ["echo","''",">",name] -> Just (EchoRedirect "" name)
-    ["echo",s,">",name] -> Just (EchoRedirect s name)
-    ["touch",name] -> Just (Touch name)
-    ["cp",path@('/':_),name] -> Just (CopyIn path name)
-    _ -> Nothing
+    [] -> Command Null
+    ('#':_):_ -> Command Null
+    ["exit"] -> ExitCommand
+    ["ls"] -> Command Ls
+    ["cd",name] -> Command (Cd name)
+    ["cat",name] -> Command (Cat name)
+    ["echo","''",">",name] -> Command (EchoRedirect "" name)
+    ["echo",s,">",name] -> Command (EchoRedirect s name)
+    ["touch",name] -> Command (Touch name)
+    ["cp",path@('/':_),name] -> Command (CopyIn path name)
+    _ -> FailedToParse
 
 type Vol = VolumeInfo
 

@@ -39,7 +39,5 @@ cp /home/nic/code/quarter-forth/x86.list x86
 # copy in a file covering multiple sectors
 cp /home/nic/code/quarter-forth/README.md rrr
 
-# Stress with a really big file... TODO: check #read/#writes
-# cp /home/nic/code/wordle/legal.sorted legal
-
-# TODO: reinstate caching
+# Stress with a really big file...
+#cp /home/nic/code/wordle/legal.sorted legal

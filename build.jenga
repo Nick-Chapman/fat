@@ -28,7 +28,7 @@ xy.image: run-script-on-image.sh empty.image script-xy
 h-xy.image : src/fat.exe empty.image script-xy
   cp $in2 $in2.writable
   chmod +w $in2.writable
-  cat script-xy | ./$in1 $in2.writable -i > /dev/null
+  cat script-xy | ./$in1 $in2.writable -i >/dev/null
   cp $in2.writable $out
 
 # Be careful to keep this hack constant big enough to detect diffs

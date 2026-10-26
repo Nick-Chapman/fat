@@ -1,7 +1,6 @@
 
 module Disk
   ( M (ReadSector,WriteSector), exec
-  , readInSector, writeInSector
   ) where
 
 import Control.Monad (ap,liftM)
@@ -29,10 +28,11 @@ data M a where
 
 data Tracking = Tracking
   { reads :: Map SectorIndex Int
+  , writes :: Map SectorIndex Int
   }
 
 initTracking :: Tracking
-initTracking = Tracking { reads = Map.empty }
+initTracking = Tracking { reads = Map.empty, writes = Map.empty }
 
 exec :: FilePath -> M a -> IO a
 exec path m0 = do
@@ -50,17 +50,17 @@ exec path m0 = do
         pure (sec, tracking')
       WriteSector si sec -> do
         --print ("WriteSector",si)
-        let tracking' = tracking --todo
+        let Tracking{writes} = tracking
+        let tracking' = tracking { writes = Map.insertWithKey (\_ -> (+)) si 1 writes }
         writeSector path si sec
         pure ((),tracking')
 
-  (a,Tracking{reads}) <- go initTracking m0
+  (a,Tracking{reads,writes}) <- go initTracking m0
   let numReads = sum (Map.elems reads)
-  let _numRepeats = numReads - length (Map.keys reads)
-  let _hist = [ (fromIntegral si :: W16,n) | (si,n) <- Map.toList reads, n > 1 ]
-  printf "[#reads=%d]\n" numReads
-  --printf "[#reads=%d, #reps=%d]\n" numReads _numRepeats
-  --printf "[reps:%s]\n" $ show _hist
+  let numWrites = sum (Map.elems writes)
+  --let _numRepeats = numReads - length (Map.keys reads)
+  --let _hist = [ (fromIntegral si :: W16,n) | (si,n) <- Map.toList reads, n > 1 ]
+  printf "[#reads=%d, #writes=%d]\n" numReads numWrites
   pure a
 
 

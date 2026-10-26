@@ -1,6 +1,6 @@
 
 module CachedDisk
-  ( M (ReadSector), exec
+  ( M (ReadSector,WriteSector), exec
   ) where
 
 import Control.Monad (ap,liftM)
@@ -19,24 +19,20 @@ data M a where
   Bind :: M a -> (a -> M b) -> M b
   LiftIO :: IO a -> M a
   ReadSector :: SectorIndex -> M Sector
+  WriteSector :: SectorIndex -> Sector -> M ()
 
 data Cache = Cache
-  { siA:: SectorIndex
-  , secA :: Sector
-  , hitsA :: Int
---  , siB:: SectorIndex
---  , secB :: Sector
---  , hitsB :: Int
+  { theSI:: SectorIndex
+  , theSec :: Sector
+  , hitsR :: Int
+  , hitsW :: Int
   }
 
 initCache :: Disk.M Cache
 initCache = do
-  let siA = -1
-  --let siB = -1
-  let secA = undefined
-  --let secB = undefined
-  --pure Cache { siA, secA, siB, secB, hitsA = 0, hitsB = 0 }
-  pure Cache { siA, secA, hitsA = 0}
+  let theSI = -1
+  let theSec = undefined
+  pure Cache { theSI, theSec, hitsR = 0, hitsW = 0 }
 
 exec :: forall a. FilePath -> M a -> IO a
 exec path m0 = Disk.exec path do
@@ -44,11 +40,8 @@ exec path m0 = Disk.exec path do
   res <- loop s0 m0 k0
   pure res
   where
-    k0 Cache{hitsA
-            -- ,hitsB
-            } a = do
-     -- liftIO (printf "[#hits=%d+%d]\n" hitsA hitsB)
-      liftIO (printf "[#hits=%d]\n" hitsA)
+    k0 Cache{hitsR,hitsW} a = do
+      liftIO (printf "[#hitsR=%d,hitsW=%d]\n" hitsR hitsW)
       pure a
     loop :: forall a b. Cache -> M a -> (Cache -> a -> Disk.M b) -> Disk.M b
     loop c = \case
@@ -58,27 +51,26 @@ exec path m0 = Disk.exec path do
       ReadSector si -> \k -> do
         (sec,c) <- readSector c si
         k c sec
+      WriteSector si sec -> \k -> do
+        c <- writeSector c si sec
+        k c ()
+
+cachingEnabled :: Bool
+cachingEnabled = True
+
+writeSector :: Cache -> SectorIndex -> Sector -> Disk.M Cache
+writeSector c@Cache{theSI} si sec = do
+  Disk.WriteSector si sec -- TODO: delay write to disk (and tick hitsW)
+  if
+    | cachingEnabled && si == theSI -> do
+        pure c { theSec = sec }
+    | otherwise -> do
+        pure c
 
 readSector :: Cache -> SectorIndex -> Disk.M (Sector, Cache)
-readSector c@Cache{siA,secA,hitsA
-                  -- ,siB,secB,hitsB
-                  } si = if
-
---  | True && True -> if -- Always in A
---  | si `mod` 2 == 0 -> if -- Odd/Even Split
---  | si < 0x200 -> if -- Low/High Split
---  | si < 0x2 -> if -- surprisingly performs the best on my two examples
-
-    | si == siA -> do
-        pure (secA, c { hitsA = 1 + hitsA })
-    | otherwise -> do
-        sec <- Disk.ReadSector si
-        pure (sec, c { siA = si, secA = sec })
-{-
-  | otherwise -> if
-    | si == siB -> do
-        pure (secB, c { hitsB = 1 + hitsB })
-    | otherwise -> do
-        sec <- Disk.ReadSector si
-        pure (sec, c { siB = si, secB = sec })
--}
+readSector c@Cache{theSI,theSec,hitsR} si = if
+  | cachingEnabled && si == theSI -> do
+      pure (theSec, c { hitsR = 1 + hitsR })
+  | otherwise -> do
+      sec <- Disk.ReadSector si
+      pure (sec, c { theSI = si, theSec = sec })
