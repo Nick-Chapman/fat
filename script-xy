@@ -1,4 +1,17 @@
 
+echo q > f1
+echo q > f2
+
+# 14th char on filename 'x' causes f8 entry to cross sector boundary
+echo q > f3-0123456789x
+
+echo q > f4
+echo q > f5
+echo q > f6
+echo q > f7
+echo q > f8
+echo q > f9
+
 echo xxx > file1
 echo yyy > file222-with-a-big-name
 echo x > file3-lljkhlkjhlkjhlkjhlkjhoiopjhtfgyhjhgkjhgkjhkkjhgkjhgkjhgkjhgk
@@ -15,7 +28,18 @@ touch fileX
 
 echo data > fileY
 
-# copy in a file
-cp /home/nic/code/quarter-forth/z.list z-list
-
 # TODO: Make longNames with "." work corectly
+
+# copy in a file (small)
+cp /home/nic/code/quarter-forth/z.list zzz
+
+# copy in a file covering 2 sectors
+cp /home/nic/code/quarter-forth/x86.list x86
+
+# copy in a file covering multiple sectors
+cp /home/nic/code/quarter-forth/README.md rrr
+
+# Stress with a really big file... TODO: check #read/#writes
+# cp /home/nic/code/wordle/legal.sorted legal
+
+# TODO: reinstate caching

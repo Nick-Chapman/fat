@@ -26,8 +26,7 @@ import Data.Char (toUpper)
 echoRedirect :: Vol -> String -> String -> M ()
 echoRedirect vol contents longName = do
   cn <- nextFreeCluster vol
-  markClusterUsed vol cn
-  createContents vol cn contents
+  writeBytesInClusterChain vol cn (bytesString contents)
   let fileSize = fi (length contents)
   let entry = makeStandardEntry cn longName fileSize
   let bytes = encodeEntry entry
@@ -35,8 +34,6 @@ echoRedirect vol contents longName = do
 
 touch :: Vol -> String -> M ()
 touch vol longName = do
-  --cn <- nextFreeCluster vol
-  --markClusterUsed vol cn
   let cn = 0
   let fileSize = 0
   let entry = makeStandardEntry cn longName fileSize
@@ -54,32 +51,41 @@ nextFreeCluster vol = loop (CN 3) -- 2 is always unused?
       cn' <- stepFatChain vol cn
       if cn' /= 0
         then loop (cn+1)
-        else pure cn
+        else
+        do
+          markFinalCluster vol cn
+          pure cn
 
-markClusterUsed :: Vol -> CN -> M ()
-markClusterUsed vol cn = do
+markFinalCluster :: Vol -> CN -> M ()
+markFinalCluster vol cn = setNextCluser vol cn 0xffff
+
+setNextCluser :: Vol -> CN -> W16 -> M ()
+setNextCluser vol cn w16 = do
   let VolumeInfo{sectorsPerFat} = vol
   (si,so) <- cn2sio vol cn
-  set16 si so 0xffff
-  set16 (si + fi sectorsPerFat) so 0xffff
+  set16 si so w16
+  set16 (si + fi sectorsPerFat) so w16 -- backup FAT
 
 ----------------------------------------------------------------------
 -- CONTENTS
 
-createContents :: Vol -> CN -> String -> M ()
-createContents vol cn contents = do
-  let si = siFromClusterNumber vol cn
-  assert (length contents < 256) $ do
-  writeBytesInSector si contents
+writeBytesInClusterChain :: Vol -> CN -> [W8] -> M ()
+writeBytesInClusterChain vol cn = loop cn
+  where
+    loop :: CN -> [W8] -> M ()
+    loop cn bytes = do
+      let si = siFromClusterNumber vol cn
+      if length bytes <= sectorSize then writeSectorBytes si 0 bytes else do
+        let (front,rest) = splitAt sectorSize bytes
+        writeSectorBytes si 0 front
+        cn' <- nextFreeCluster vol
+        setNextCluser vol cn (fi cn')
+        loop cn' rest
 
-writeBytesInSector :: SectorIndex -> String -> M ()
-writeBytesInSector si string = do
-  let n = length string
-  assert (n <= 256) $ do
-  let bytes :: [W8] = [ fromIntegral (c2w c) | c <- string ]
-  sequence_ [ set8 si i b | (i,b) <- zip [0..] bytes ]
-  pure ()
-
+writeSectorBytes :: SectorIndex -> SectorOffset -> [W8] -> M ()
+writeSectorBytes si so0 bytes = do
+  assert (fi so0 + length bytes <= sectorSize) $ do
+  sequence_ [ set8 si so b | (so,b) <- zip [so0..] bytes ]
 
 ----------------------------------------------------------------------
 -- DIRECTORY write
@@ -87,14 +93,20 @@ writeBytesInSector si string = do
 writeRootDirEntry :: Vol -> [W8] -> M ()
 writeRootDirEntry vol bytes = do
   (si,so) <- findRootDirNextEntry vol
-  writeBytes si so bytes
+  let remainingSpaceInSector = sectorSize - fi so
+  if (length bytes < remainingSpaceInSector) then writeSectorBytes si so bytes else do
+    let (front,rest) = splitAt remainingSpaceInSector bytes
+    -- Can a long name entry cause a further sector boundary crossing?
+    assert (length rest <= sectorSize) $ do -- assert not
+    writeSectorBytes si so front
+    writeSectorBytes (si+1) 0 rest
 
 findRootDirNextEntry :: VolumeInfo -> M (SectorIndex,SectorOffset)
 findRootDirNextEntry VolumeInfo{rootDirBegin} = loop rootDirBegin 0
   where
     loop :: SectorIndex -> SectorOffset -> M (SectorIndex,SectorOffset)
     loop si so = if
-      | so >= 512 -> do
+      | fi so >= sectorSize -> do
           loop (si+1) 0
       | otherwise -> do
           DirRecord{kind} <- getDirRecord "" si so
@@ -108,7 +120,7 @@ findRootDirNextEntry VolumeInfo{rootDirBegin} = loop rootDirBegin 0
 encodeEntry :: StandardEntry -> [W8]
 encodeEntry entry = do
   let StandardEntry{longName,shortName8,extension3} = entry
-  let chop s = if length s <= 13 then [s] else take 13 s : chop (drop 13 s)
+  let chop = \case [] -> []; str -> let (h,t) = splitAt 13 str in h : chop t
   let parts = chop longName
   let shortName = shortName8 ++ extension3
   encodeLongNameEnties shortName parts ++ encodeStandardEntry entry
@@ -185,10 +197,6 @@ encodeStandardEntry e = do
     ++ bytes16 (fi startingCluster)
     ++ bytes32 fileSize
 
-
-writeBytes :: SectorIndex -> SectorOffset -> [W8] -> M ()
-writeBytes si so bytes = do
-  sequence_ [ set8 si (so + i) b | (i,b) <- zip [0..] bytes ]
 
 bytes16 :: W16 -> [W8]
 bytes16 w = [lo,hi] where HL{lo,hi} = split16 w

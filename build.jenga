@@ -31,6 +31,10 @@ h-xy.image : src/fat.exe empty.image script-xy
   cat script-xy | ./$in1 $in2.writable -i > /dev/null
   cp $in2.writable $out
 
+# Be careful to keep this hack constant big enough to detect diffs
+# Currently 20k lines; reaches until offset 4e200 in the image.
+# Check how big the offset must be: hd /tmp/far.image | tail -3
+
 xy.image.hd : xy.image
   hd -v $in | head -20000 > $out
 
