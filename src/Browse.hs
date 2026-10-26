@@ -5,8 +5,11 @@ import FileTree (Tree(..),Entry(..),printTree)
 import Prelude hiding (interact)
 import System.Console.ANSI qualified as AN
 import System.Console.Haskeline qualified as HL
+import System.IO qualified as IO (stderr)
+import System.IO (hFlush,hPutStrLn)
 import Text.Printf (printf)
 import TheDisk (M,exec)
+
 import Fat16
 
 dump :: FilePath -> IO ()
@@ -54,7 +57,7 @@ interact path = do
           Just line -> do
             case parseCom line of
               Nothing -> do
-                liftIO $ putStrLn (col AN.Red "syntax error")
+                errM (printf "syntax error: '%s'" line)
                 loop state
               Just com -> do
                 state <- execCom vol state com
@@ -62,17 +65,13 @@ interact path = do
 
     loop state0
 
-runHL :: HL.InputT IO a -> IO a
-runHL = HL.runInputT HL.defaultSettings
-
-col :: AN.Color -> String -> String
-col c s =
-  AN.setSGRCode [AN.SetColor AN.Foreground AN.Vivid c] <> s <>
-  AN.setSGRCode [AN.SetColor AN.Foreground AN.Vivid AN.White]
+data Com = Null | Ls | Cat Name | Cd Name | EchoRedirect String Name | Touch Name
 
 parseCom :: String -> Maybe Com
 parseCom s =
   case words s of
+    [] -> Just Null
+    ('#':_):_ -> Just Null
     ["ls"] -> Just Ls
     ["cd",name] -> Just (Cd name)
     ["cat",name] -> Just (Cat name)
@@ -83,8 +82,6 @@ parseCom s =
 
 type Vol = VolumeInfo
 
-data Com = Ls | Cat Name | Cd Name | EchoRedirect String Name | Touch Name
-
 type Name = String
 
 data State = State { cwd :: Dir }
@@ -94,6 +91,8 @@ state0 = State { cwd = Root }
 
 execCom :: Vol -> State -> Com -> M State
 execCom vol state@State{cwd} = \case
+  Null -> do
+    pure state
   Ls -> do
     lsDirAction vol cwd
     pure state
@@ -117,6 +116,10 @@ execCom vol state@State{cwd} = \case
 data Dir = Root | Sub CN
 data File = File DirRecord
 data Item = IDir Dir | IFile File
+
+catFileAction :: Vol -> File -> M ()
+catFileAction vol (File dr) = do
+  getFileContents vol dr >>= liftIO . putStr
 
 lookupSubDir :: Vol -> Dir -> Name -> M (Maybe Dir)
 lookupSubDir vol dir name =
@@ -167,8 +170,18 @@ lookupItem vol dir sought = do
       pure Nothing
 
 errM :: String -> M ()
-errM s = liftIO $ putStrLn ("Error: " ++ s ++ "\n")
+errM s = liftIO $ putErr (col AN.Red "Error: " ++ s ++ "\n")
 
-catFileAction :: Vol -> File -> M ()
-catFileAction vol (File dr) = do
-  getFileContents vol dr >>= liftIO . putStr
+runHL :: HL.InputT IO a -> IO a
+runHL = HL.runInputT HL.defaultSettings
+
+col :: AN.Color -> String -> String
+col c s =
+  AN.setSGRCode [AN.SetColor AN.Foreground AN.Vivid c] <> s <>
+  AN.setSGRCode [AN.SetColor AN.Foreground AN.Vivid AN.White]
+
+putErr :: String -> IO ()
+putErr s = do
+  hPutStrLn IO.stderr s
+  hFlush IO.stderr
+  pure ()
