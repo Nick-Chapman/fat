@@ -1,20 +1,20 @@
 
-echo q > f1
-mkdir sub
-echo q > f2
+echo x > f1
 
+mkdir sub
+cd sub
+
+echo y > f2
 
 # 14th char on filename 'x' causes f8 entry to cross sector boundary
 echo q > f3-0123456789x
-
-
 
 echo q > f4
 echo q > f5
 echo q > f6
 echo q > f7
 echo q > f8
-echo q > f9
+echo qqq > f9
 
 echo xxx > file1
 echo yyy > file222-with-a-big-name
@@ -22,15 +22,18 @@ echo x > file3-lljkhlkjhlkjhlkjhlkjhoiopjhtfgyhjhgkjhgkjhkkjhgkjhgkjhgkjhgk
 echo x > file5
 echo x > file6
 echo x > file7
-echo x > file8-kjhgkjhhkjhhhjkjhjk
+echo x > file8-1234567x
 echo x > file9
 
 echo '' > file10
 
 # touch is not quite the same as echo ''; it uses no cluser/number for the data
-touch fileX
+#touch fileX
 
-echo data > fileY
+echo data1 > fileY
+echo data2 > fileZ
+echo data3 > fileOM
+
 
 # TODO: Make longNames with "." work corectly
 
@@ -44,7 +47,9 @@ cp /home/nic/code/quarter-forth/x86.list x86
 cp /home/nic/code/quarter-forth/README.md rrr
 
 # Stress with a really big file...
-#cp /home/nic/code/wordle/legal.sorted legal
+cp /home/nic/code/wordle/legal.sorted legal
 
-# Subdirectories...
-mkdir anotherSubDir
+
+
+# TODO: subdir in a subdir, not quite right yet
+# mkdir anotherSubDir

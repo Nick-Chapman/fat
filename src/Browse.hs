@@ -20,7 +20,7 @@ dump path = exec path $ do
 
 getTree :: VolumeInfo -> M Tree
 getTree vol = do
-  rs <- getRootDirInfo vol
+  rs <- getDirInfo vol Root
   binds <- sequence [ do entry <- deepEntry r; pure (longName,entry)
                     | r@DirRecord{longName} <- rs
                     ]
@@ -28,7 +28,7 @@ getTree vol = do
   where
     deepTree :: CN -> M Tree
     deepTree cn = do
-      rs <- getDirInfo vol cn
+      rs <- getDirInfo vol (Sub cn)
       binds <- sequence [ do entry <- deepEntry r; pure (longName,entry)
                         | r@DirRecord{longName} <- rs
                         , longName /= "."
@@ -122,20 +122,19 @@ execCom vol state@State{cwd} = \case
       Nothing -> pure state
       Just dir -> pure state { cwd = dir }
   EchoRedirect contents name -> do
-    echoRedirect vol (contents++"\n") name
+    echoRedirect vol (contents++"\n") name cwd
     pure state
   Touch name -> do
-    touch vol name
+    touch vol name cwd
     pure state
   CopyIn path name -> do
     contents <- liftIO $ readFile path
-    echoRedirect vol contents name
+    echoRedirect vol contents name cwd
     pure state
   Mkdir name -> do
-    mkDir vol name
+    mkDir vol name cwd
     pure state
 
-data Dir = Root | Sub CN
 data File = File DirRecord
 data Item = IDir Dir | IFile File
 
@@ -163,9 +162,7 @@ lookupFile vol dir name =
 
 lsDirAction :: Vol -> Dir -> M ()
 lsDirAction vol dir = do
-  rs <- case dir of
-    Root -> getRootDirInfo vol
-    Sub cn -> getDirInfo vol cn
+  rs <- getDirInfo vol dir
   let
     showRec :: DirRecord -> IO ()
     showRec DirRecord{longName,fileSize,isDir} = do
@@ -177,9 +174,7 @@ lsDirAction vol dir = do
 
 lookupItem :: Vol -> Dir -> Name -> M (Maybe Item)
 lookupItem vol dir sought = do
-  rs <- case dir of -- TODO: be incremental?
-    Root -> getRootDirInfo vol
-    Sub cn -> getDirInfo vol cn
+  rs <- getDirInfo vol dir -- TODO: be incremental?
   case [ if isDir
          then IDir (if firstCluster == 0 then Root else Sub firstCluster)
          else IFile (File dr)
