@@ -1,6 +1,6 @@
 
 module Types
-  ( W8, W16, W32, mk16, mk32, toChar, split16, split32
+  ( W8(..), W16, W32, mk16, mk32, toChar, split16, split32
   , HL(..)
   , SectorIndex
   , SectorOffset(..)
@@ -8,6 +8,7 @@ module Types
   ) where
 
 import Data.Bits (Bits)
+import Data.Ix (Ix)
 import Data.ByteString.Internal (w2c,c2w)
 import Data.Word (Word8,Word16,Word32)
 import Prelude hiding (interact)
@@ -21,7 +22,7 @@ newtype W8 = W8 Word8
 instance Show W8 where show (W8 w) = printf "$%02x" w
 
 newtype W16 = W16 Word16
-  deriving (Num,Integral,Real,Enum,Ord,Eq,Bits)
+  deriving (Num,Integral,Real,Enum,Ord,Eq,Bits,Ix)
 instance Show W16 where show (W16 w) = printf "$%04x" w
 
 newtype W32 = W32 Word32 deriving (Num,Integral,Real,Enum,Ord,Eq)
@@ -48,7 +49,7 @@ newtype SectorIndex = SectorIndex W16
   deriving (Num,Integral,Real,Enum,Ord,Eq,Bits,Show)
 
 newtype SectorOffset = SectorOffset W16 -- TODO: actually only need 9 bits
-  deriving (Num,Integral,Real,Enum,Ord,Eq,Bits,Show)
+  deriving (Num,Integral,Real,Enum,Ord,Eq,Bits,Show,Ix)
 
 bytes16 :: W16 -> [W8]
 bytes16 w = [lo,hi] where HL{lo,hi} = split16 w
