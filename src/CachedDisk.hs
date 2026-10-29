@@ -2,7 +2,7 @@
 module CachedDisk
   ( M, exec
   , Sector, sectorSize
-  , readSector, writeSector
+  , loadSector, saveSector
   , readInSector, writeInSector
   ) where
 
@@ -18,11 +18,11 @@ instance Applicative M where pure = Pure; (<*>) = ap
 instance Monad M where (>>=) = Bind
 instance MonadIO M where liftIO = LiftDisk . liftIO
 
-readSector :: SectorIndex -> M Sector
-readSector = ReadSector
+loadSector :: SectorIndex -> M Sector
+loadSector = LoadSector
 
-writeSector :: SectorIndex -> Sector -> M ()
-writeSector = WriteSector
+saveSector :: SectorIndex -> Sector -> M ()
+saveSector = SaveSector
 
 readInSector :: Sector -> SectorOffset -> M W8
 readInSector sec so = LiftDisk (Disk.readInSector sec so)
@@ -34,8 +34,8 @@ data M a where
   Pure :: a -> M a
   Bind :: M a -> (a -> M b) -> M b
   LiftDisk :: Disk.M a -> M a
-  ReadSector :: SectorIndex -> M Sector
-  WriteSector :: SectorIndex -> Sector -> M ()
+  LoadSector :: SectorIndex -> M Sector
+  SaveSector :: SectorIndex -> Sector -> M ()
 
 data Cache = Cache
   { theSI:: SectorIndex
@@ -66,33 +66,33 @@ exec path m0 = Disk.exec path do
       Pure x -> \k -> k c x
       Bind m f -> \k -> loop c m \c a -> loop c (f a) k
       LiftDisk m -> \k -> m >>= k c
-      ReadSector si -> \k -> do
-        (sec,c) <- readSectorC c si
+      LoadSector si -> \k -> do
+        (sec,c) <- loadSectorC c si
         k c sec
-      WriteSector si sec -> \k -> do
-        c <- writeSectorC c si sec
+      SaveSector si sec -> \k -> do
+        c <- saveSectorC c si sec
         k c ()
 
 flushCache :: Cache -> Disk.M ()
 flushCache Cache{theSI,theSec,dirty} = if
   | dirty -> do
-      Disk.writeSector theSI theSec
+      Disk.saveSector theSI theSec
   | otherwise -> do
       pure ()
 
-writeSectorC :: Cache -> SectorIndex -> Sector -> Disk.M Cache
-writeSectorC c@Cache{theSI,batchedW} si sec = if
+saveSectorC :: Cache -> SectorIndex -> Sector -> Disk.M Cache
+saveSectorC c@Cache{theSI,batchedW} si sec = if
   | si == theSI -> do
       pure c { theSec = sec, dirty = True,  batchedW = 1 + batchedW }
   | otherwise -> do
       flushCache c
       pure c { theSec = sec, dirty = False }
 
-readSectorC :: Cache -> SectorIndex -> Disk.M (Sector, Cache)
-readSectorC c@Cache{theSI,theSec,hitsR} si = if
+loadSectorC :: Cache -> SectorIndex -> Disk.M (Sector, Cache)
+loadSectorC c@Cache{theSI,theSec,hitsR} si = if
   | si == theSI -> do
       pure (theSec, c { hitsR = 1 + hitsR })
   | otherwise -> do
       flushCache c
-      sec <- Disk.readSector si
+      sec <- Disk.loadSector si
       pure (sec, c { theSI = si, theSec = sec, dirty = False })

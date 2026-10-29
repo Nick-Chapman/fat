@@ -2,7 +2,7 @@
 module Disk
   ( M, exec
   , Sector, sectorSize
-  , readSector, writeSector
+  , loadSector, saveSector
   , readInSector, writeInSector
   ) where
 
@@ -39,6 +39,7 @@ deSector (Sector bsR) = do
   bs <- liftIO (readIORef bsR)
   pure $ B.pack (map fromIntegral bs)
 
+-- TODO: clearer "From" insetad of "In" ?
 readInSector :: Sector -> SectorOffset -> M W8
 readInSector (Sector bsR) (SectorOffset n) = do
   bs <- liftIO (readIORef bsR)
@@ -50,26 +51,27 @@ writeInSector (Sector bsR) (SectorOffset n) b = do
   let bs' = take (fromIntegral n) bs ++ [b] ++ drop (fromIntegral n + 1) bs
   liftIO (writeIORef bsR bs')
 
-readSector :: SectorIndex -> M Sector
-readSector = ReadSector
+loadSector :: SectorIndex -> M Sector
+loadSector = LoadSector
 
-writeSector :: SectorIndex -> Sector -> M ()
-writeSector = WriteSector
+saveSector :: SectorIndex -> Sector -> M ()
+saveSector = SaveSector
 
+-- TODO: Is the GADT buying anything?
 data M a where
   Pure :: a -> M a
   Bind :: M a -> (a -> M b) -> M b
   LiftIO :: IO a -> M a
-  ReadSector :: SectorIndex -> M Sector
-  WriteSector :: SectorIndex -> Sector -> M ()
+  LoadSector :: SectorIndex -> M Sector
+  SaveSector :: SectorIndex -> Sector -> M ()
 
 data Tracking = Tracking
-  { reads :: Map SectorIndex Int
-  , writes :: Map SectorIndex Int
+  { loads :: Map SectorIndex Int
+  , saves :: Map SectorIndex Int
   }
 
 initTracking :: Tracking
-initTracking = Tracking { reads = Map.empty, writes = Map.empty }
+initTracking = Tracking { loads = Map.empty, saves = Map.empty }
 
 exec :: FilePath -> M a -> IO a
 exec path m0 = do
@@ -79,37 +81,37 @@ exec path m0 = do
       Pure x -> pure (x,tracking)
       Bind m f -> do (a,tracking) <- go tracking m; go tracking (f a)
       LiftIO io -> do a <- io; pure (a,tracking)
-      ReadSector si -> do
-        --print ("ReadSector",si)
-        let Tracking{reads} = tracking
-        let tracking' = tracking { reads = Map.insertWithKey (\_ -> (+)) si 1 reads }
-        sec <- readSectorIO path si
+      LoadSector si -> do
+        --print ("LoadSector",si)
+        let Tracking{loads} = tracking
+        let tracking' = tracking { loads = Map.insertWithKey (\_ -> (+)) si 1 loads }
+        sec <- loadSectorIO path si
         pure (sec, tracking')
-      WriteSector si sec -> do
-        --print ("WriteSector",si)
-        let Tracking{writes} = tracking
-        let tracking' = tracking { writes = Map.insertWithKey (\_ -> (+)) si 1 writes }
-        writeSectorIO path si sec
+      SaveSector si sec -> do
+        --print ("SaveSector",si)
+        let Tracking{saves} = tracking
+        let tracking' = tracking { saves = Map.insertWithKey (\_ -> (+)) si 1 saves }
+        saveSectorIO path si sec
         pure ((),tracking')
 
-  (a,Tracking{reads,writes}) <- go initTracking m0
-  let numReads = sum (Map.elems reads)
-  let numWrites = sum (Map.elems writes)
-  --let _numRepeats = numReads - length (Map.keys reads)
-  --let _hist = [ (fromIntegral si :: W16,n) | (si,n) <- Map.toList reads, n > 1 ]
-  printf "[#reads=%d, #writes=%d]\n" numReads numWrites
+  (a,Tracking{loads,saves}) <- go initTracking m0
+  let numLoads = sum (Map.elems loads)
+  let numSaves = sum (Map.elems saves)
+  --let _numRepeats = numLoads - length (Map.keys loads)
+  --let _hist = [ (fromIntegral si :: W16,n) | (si,n) <- Map.toList loads, n > 1 ]
+  printf "[#loads=%d, #saves=%d]\n" numLoads numSaves
   pure a
 
 
 ----------------------------------------------------------------------
 
-readSectorIO :: FilePath -> SectorIndex -> IO Sector
-readSectorIO diskImagePath i = do
+loadSectorIO :: FilePath -> SectorIndex -> IO Sector
+loadSectorIO diskImagePath i = do
   withSectorSeek diskImagePath i $ \fd -> do
     fdRead fd (fromIntegral sectorSize) >>= mkSector
 
-writeSectorIO :: FilePath -> SectorIndex -> Sector -> IO ()
-writeSectorIO diskImagePath i s = do
+saveSectorIO :: FilePath -> SectorIndex -> Sector -> IO ()
+saveSectorIO diskImagePath i s = do
   withSectorSeek diskImagePath i $ \fd -> do
     bs <- deSector s
     _::ByteCount <- fdWrite fd bs
