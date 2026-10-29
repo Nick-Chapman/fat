@@ -48,7 +48,7 @@ data Cache = Cache
 initCache :: Disk.M Cache
 initCache = do
   let theSI = -1
-  let theSec = undefined
+  theSec <- Disk.newSector
   pure Cache { theSI, theSec, hitsR = 0, batchedW = 0, dirty = False }
 
 exec :: forall a. FilePath -> M a -> IO a
@@ -94,5 +94,5 @@ loadSectorC c@Cache{theSI,theSec,hitsR} si = if
       pure (theSec, c { hitsR = 1 + hitsR })
   | otherwise -> do
       flushCache c
-      sec <- Disk.loadSector si
-      pure (sec, c { theSI = si, theSec = sec, dirty = False })
+      Disk.loadIntoSector si theSec
+      pure (theSec, c { theSI = si, dirty = False })
