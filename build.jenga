@@ -44,3 +44,25 @@ h-xy.image.hd : h-xy.image
 *test-xy.diff : xy.image.hd h-xy.image.hd
   diff $in1 $in2
   #git diff --word-diff=color $in1 $in2
+
+
+# Setup a new test, called del (write ops with delete), modelled on xy...
+
+del.image: run-script-on-image.sh empty.image script-del
+  ./$in1 $in2 script-del $out
+
+h-del.image : src/fat.exe empty.image script-del
+  cp $in2 $in2.writable
+  chmod +w $in2.writable
+  cat script-del | ./$in1 $in2.writable -i >/dev/null
+  cp $in2.writable $out
+
+del.image.hd : del.image
+  hd -v $in | head -20000 > $out
+
+h-del.image.hd : h-del.image
+  hd -v $in | head -20000 > $out
+
+*test-del.diff : del.image.hd h-del.image.hd
+  diff $in1 $in2
+  #git diff --word-diff=color $in1 $in2
