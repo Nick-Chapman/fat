@@ -42,14 +42,15 @@ getTree vol = deepTree Root
         contents <- getFileContents vol file
         pure (EFile contents)
 
-interact :: (Date,Time) -> FilePath -> IO ()
-interact dt path = do
+interact :: Bool -> (Date,Time) -> FilePath -> IO ()
+interact showPrompt dt path = do
+  let prompt = if showPrompt then (col AN.Green $ "> ") else ""
   exec path $ do
     vol <- getVolumeInfo 0
     let
       loop :: State -> M ()
       loop state = do
-        (liftIO $ runHL $ HL.getInputLine (col AN.Green $ "> ")) >>= \case
+        (liftIO $ runHL $ HL.getInputLine prompt) >>= \case
           Nothing -> pure ()
           Just line -> do
             case parseCom line of

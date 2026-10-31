@@ -1,3 +1,4 @@
+/birth : ""
 /first : "contents\n"
 /abc-defghijklmnopqrstuvwxyz : "q\n"
 /zero : ""
@@ -28,5 +29,5 @@
 /d : "x\n"
 /e : "x\n"
 /empty : ""
-[#hitsR=2440,batchedW=0]
+[#hitsR=2491,batchedW=0]
 [#loads=39, #saves=0, #slots=1]

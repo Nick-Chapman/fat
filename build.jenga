@@ -9,11 +9,11 @@ empty.image: create-empty-fat.sh
 
 # big: use for interacting with
 big.image: run-script-on-image.sh empty.image script-big
-  ./$in1 $in2 script-big $out
+  ./$in1 $in2 script-big $out /dev/null
 
 # small: used for test1 (read-ops)
 small.image: run-script-on-image.sh empty.image script-small
-  ./$in1 $in2 script-small $out
+  ./$in1 $in2 script-small $out /dev/null
 
 test1.out : src/fat.exe small.image
   cp $in2 $in2.writable
@@ -22,7 +22,7 @@ test1.out : src/fat.exe small.image
 
 # xy: use for xy-diff test (write ops)
 xy.image: run-script-on-image.sh empty.image script-xy
-  ./$in1 $in2 script-xy $out
+  ./$in1 $in2 script-xy $out /dev/null
 
 # h-prefix: the image created by my haskell fat16 code
 h-xy.image : src/fat.exe empty.image script-xy
@@ -48,13 +48,14 @@ h-xy.image.hd : h-xy.image
 
 # Setup a new test, called del (write ops with delete), modelled on xy...
 
-del.image: run-script-on-image.sh empty.image script-del
+
+del.image del.birth: run-script-on-image.sh empty.image script-del
   ./$in1 $in2 script-del $out
 
-h-del.image : src/fat.exe empty.image script-del
+h-del.image : src/fat.exe empty.image script-del del.birth
   cp $in2 $in2.writable
   chmod +w $in2.writable
-  cat script-del | ./$in1 $in2.writable -i >/dev/null
+  cat script-del | ./$in1 $in2.writable -b $$(cat del.birth) #>/dev/null
   cp $in2.writable $out
 
 del.image.hd : del.image

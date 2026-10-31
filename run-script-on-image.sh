@@ -1,9 +1,10 @@
 #!/bin/bash
 
-if [ $# != 3 ]; then echo "**Usage: $0 [start.image] [script] [finish.image]"; exit 1; fi
+if [ $# != 4 ]; then echo "**Usage: $0 [start.image] [script] [finish.image] [birth.out]"; exit 1; fi
 start=$1
 script=$2
 final=$3
+birth=$4
 
 fs_image=/tmp/fat.image
 fs=/mnt/play
@@ -17,6 +18,7 @@ sudo unshare --time bash -c 'date -s "1997-12-29 12:25:02"' > /dev/null
 # The date set above for the separate time domain strangley persists
 # when running the script
 (cd $fs; . $here/$script)
+stat $fs/birth | grep Birth | cut -d' ' -f3- | cut -d'.' -f1 > $birth
 sleep 0
 umount -l $fs
 

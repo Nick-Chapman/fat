@@ -1,3 +1,4 @@
+touch birth
 
 echo x > first
 echo x > first.txt
