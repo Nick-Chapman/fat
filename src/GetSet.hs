@@ -1,5 +1,8 @@
 
-module GetSet where -- TODO: export
+module GetSet
+  ( get8, get16, get32, getBytes
+  , set8, set16, set32
+  ) where
 
 import TheDisk (M, loadSector, saveSector, readInSector, writeInSector)
 import Types (HL(..),SectorIndex,SectorOffset,W8,W16,W32,mk16,mk32,split16,split32)
