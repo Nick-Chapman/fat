@@ -3,6 +3,7 @@ module Top (main) where
 import Browse qualified (dump,interact)
 import System.Environment (getArgs)
 import Text.Printf (printf)
+import DateTime (wellKnownDate,wellKnownTime)
 
 main :: IO ()
 main = do
@@ -10,7 +11,10 @@ main = do
   let Config{imageFile,mode} = parseConfig args
   case mode of
     Dump -> Browse.dump imageFile
-    Interact -> Browse.interact imageFile
+    Interact -> Browse.interact dt imageFile
+      where
+        -- TODO: use actual current date/time when not in batch mode
+        dt = (wellKnownDate, wellKnownTime)
 
 data Config = Config
   { imageFile :: FilePath

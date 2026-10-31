@@ -23,7 +23,7 @@ import Prelude hiding (interact)
 import TheDisk (M,sectorSize)
 import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,bytes16,bytes32,bytesString)
 import Volume (bytesPerDirEntry,Vol(..))
-import DateTime (Date,Time,dateWord,timeWord,wellKnownDate,wellKnownTime)
+import DateTime (Date,Time,dateWord,timeWord)
 
 data Entry = Entry { longName :: String, item :: Item }
 
@@ -43,16 +43,16 @@ entryOfDR DirRecord{longName,isDir,fileSize,firstCluster} =
           else IFile (File{fileSize,firstCluster})
         }
 
-touch :: Vol -> String -> Dir -> M ()
-touch vol longName dir = do
-  let entry = makeStandardEntry 0 (makeShort longName) (FileOfSize 0)
+touch :: Vol -> (Date,Time) -> String -> Dir -> M ()
+touch vol dt longName dir = do
+  let entry = makeStandardEntry dt 0 (makeShort longName) (FileOfSize 0)
   let bytes = encodeEntry longName entry
   writeDirEntry vol bytes dir
 
-echoRedirect :: Vol -> String -> String -> Dir -> M ()
-echoRedirect vol contents longName dir = do
+echoRedirect :: Vol -> (Date,Time) -> String -> String -> Dir -> M ()
+echoRedirect vol dt contents longName dir = do
   let fileSize = fi (length contents)
-  let entry = makeStandardEntry 0 (makeShort longName) (FileOfSize fileSize)
+  let entry = makeStandardEntry dt 0 (makeShort longName) (FileOfSize fileSize)
   let bytes = encodeEntry longName entry
   -- to get byte match: nextFreeCluster; writeDirEntry
   writeDirEntry vol bytes dir
@@ -60,19 +60,19 @@ echoRedirect vol contents longName dir = do
   setStartingCluster vol longName cn dir
   writeBytesInClusterChain vol cn (bytesString contents)
 
-mkDir :: Vol -> String -> Dir -> M ()
-mkDir vol longName dir = do
+mkDir :: Vol -> (Date,Time) -> String -> Dir -> M ()
+mkDir vol dt longName dir = do
   -- to get byte match: nextFreeCluster; writeDirEntry
   cn <- nextFreeCluster vol
-  let entry = makeStandardEntry cn (makeShort longName) Subdir
+  let entry = makeStandardEntry dt cn (makeShort longName) Subdir
   let bytes = encodeEntry longName entry
   writeDirEntry vol bytes dir
-  writeBytesInClusterChain vol cn (emptyDirBytes cn dir)
+  writeBytesInClusterChain vol cn (emptyDirBytes dt cn dir)
 
-emptyDirBytes :: CN -> Dir -> [W8]
-emptyDirBytes cn parent =
-  (encodeStandardEntry $ makeStandardEntry cn "." Subdir) ++
-  (encodeStandardEntry $ makeStandardEntry (dir2cn parent) ".." Subdir)
+emptyDirBytes :: (Date,Time) -> CN -> Dir -> [W8]
+emptyDirBytes dt cn parent =
+  (encodeStandardEntry $ makeStandardEntry dt cn "." Subdir) ++
+  (encodeStandardEntry $ makeStandardEntry dt (dir2cn parent) ".." Subdir)
 
 dir2cn :: Dir -> CN
 dir2cn = \case
@@ -396,13 +396,11 @@ makeShort longName = do
   let ext3 = trunOrPadSpace 3 (map toUpper ext)
   short8 ++ ext3
 
-makeStandardEntry :: CN -> String -> Thing -> StandardEntry
-makeStandardEntry startingCluster shortName thing = do
+makeStandardEntry :: (Date,Time) -> CN -> String -> Thing -> StandardEntry
+makeStandardEntry (date,time) startingCluster shortName thing = do
   let (fileSize,attrByte) = case thing of
         FileOfSize n -> (n, 0x20)
         Subdir -> (0, 0x10)
-  let date = wellKnownDate
-  let time = wellKnownTime
   StandardEntry { shortName
                 , attrByte
                 , bdate = date

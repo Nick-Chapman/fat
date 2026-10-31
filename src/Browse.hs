@@ -11,6 +11,7 @@ import System.IO qualified as IO (stderr)
 import Text.Printf (printf)
 import TheDisk (M,exec)
 import Volume (Vol,getVolumeInfo)
+import DateTime (Date,Time)
 
 dump :: FilePath -> IO ()
 dump path = exec path $ do
@@ -41,8 +42,8 @@ getTree vol = deepTree Root
         contents <- getFileContents vol file
         pure (EFile contents)
 
-interact :: FilePath -> IO ()
-interact path = do
+interact :: (Date,Time) -> FilePath -> IO ()
+interact dt path = do
   exec path $ do
     vol <- getVolumeInfo 0
     let
@@ -58,7 +59,7 @@ interact path = do
               ExitCommand -> do
                 pure ()
               Command com -> do
-                state <- execCom vol state com
+                state <- execCom vol dt state com
                 loop state
 
     loop state0
@@ -100,8 +101,8 @@ data State = State { cwd :: Dir }
 state0 :: State
 state0 = State { cwd = Root }
 
-execCom :: Vol -> State -> Com -> M State
-execCom vol state@State{cwd} = \case
+execCom :: Vol -> (Date,Time) -> State -> Com -> M State
+execCom vol dt state@State{cwd} = \case
   Null -> do
     pure state
   Ls -> do
@@ -118,17 +119,17 @@ execCom vol state@State{cwd} = \case
       Nothing -> pure state
       Just dir -> pure state { cwd = dir }
   EchoRedirect contents name -> do
-    echoRedirect vol (contents++"\n") name cwd
+    echoRedirect vol dt (contents++"\n") name cwd
     pure state
   Touch name -> do
-    touch vol name cwd
+    touch vol dt name cwd
     pure state
   CopyIn path name -> do
     contents <- liftIO $ readFile path
-    echoRedirect vol contents name cwd
+    echoRedirect vol dt contents name cwd
     pure state
   Mkdir name -> do
-    mkDir vol name cwd
+    mkDir vol dt name cwd
     pure state
   Rm name -> do
     rmCommand vol name cwd
