@@ -3,7 +3,7 @@ module Top (main) where
 import Browse qualified (dump,interact)
 import System.Environment (getArgs)
 import Text.Printf (printf)
-import DateTime (wellKnownDate,wellKnownTime)
+import DateTime (wellKnownDate,wellKnownTime,parseDate,parseTime)
 
 main :: IO ()
 main = do
@@ -16,8 +16,10 @@ main = do
     Interact -> Browse.interact True (wellKnownDate, wellKnownTime) imageFile
 
     Batch{dateString,timeString} -> do
-      print ("Batch",dateString,timeString)
-      Browse.interact False (wellKnownDate,wellKnownTime) imageFile
+      --print ("Batch",dateString,timeString)
+      let date = parseDate dateString
+      let time = parseTime timeString
+      Browse.interact False (date,time) imageFile
 
 data Config = Config
   { imageFile :: FilePath

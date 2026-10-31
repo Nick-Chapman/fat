@@ -21,14 +21,14 @@ test1.out : src/fat.exe small.image
   ./$in1 $in2.writable > $out
 
 # xy: use for xy-diff test (write ops)
-xy.image: run-script-on-image.sh empty.image script-xy
-  ./$in1 $in2 script-xy $out /dev/null
+xy.image xy.birth: run-script-on-image.sh empty.image script-xy
+  ./$in1 $in2 script-xy $out
 
 # h-prefix: the image created by my haskell fat16 code
-h-xy.image : src/fat.exe empty.image script-xy
+h-xy.image : src/fat.exe empty.image script-xy xy.birth
   cp $in2 $in2.writable
   chmod +w $in2.writable
-  cat script-xy | ./$in1 $in2.writable -i >/dev/null
+  cat script-xy | ./$in1 $in2.writable -b $$(cat xy.birth) #>/dev/null
   cp $in2.writable $out
 
 # Be careful to keep this hack constant big enough to detect diffs

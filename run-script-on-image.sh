@@ -14,11 +14,15 @@ cp $start $fs_image
 
 here=$(pwd)
 mount $fs
-sudo unshare --time bash -c 'date -s "1997-12-29 12:25:02"' > /dev/null
-# The date set above for the separate time domain strangley persists
-# when running the script
+sleep 0
+
+# TODO: make it work, even without setting a referecne time...
+#sudo unshare --time bash -c 'date -s "1997-12-29 12:25:02"' > /dev/null
+sudo unshare --time bash -c 'date -s "2011-11-11 12:34:56"' > /dev/null
+
+
 (cd $fs; . $here/$script)
-stat $fs/birth | grep Birth | cut -d' ' -f3- | cut -d'.' -f1 > $birth
+stat $fs/birth | grep Birth | cut -d' ' -f3- | cut -c1-22 > $birth
 sleep 0
 umount -l $fs
 

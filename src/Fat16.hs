@@ -23,7 +23,7 @@ import Prelude hiding (interact)
 import TheDisk (M,sectorSize)
 import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,bytes16,bytes32,bytesString)
 import Volume (bytesPerDirEntry,Vol(..))
-import DateTime (Date,Time,dateWord,timeWord)
+import DateTime (Date,Time,dateWord,timeWord,fineTimeByte)
 
 data Entry = Entry { longName :: String, item :: Item }
 
@@ -404,11 +404,20 @@ makeStandardEntry (date,time) startingCluster shortName thing = do
 
 encodeStandardEntry :: StandardEntry -> [W8]
 encodeStandardEntry e = do
-  let StandardEntry {shortName,attrByte,btime,bdate,adate,mtime,mdate,startingCluster,fileSize} = e
+  let StandardEntry {shortName
+                    ,attrByte
+                    ,btime
+                    ,bdate
+                    ,adate
+                    ,mtime
+                    ,mdate
+                    ,startingCluster
+                    ,fileSize
+                    } = e
   bytesString (trunOrPadSpace 11 shortName)
     ++ [attrByte]
     ++ [0] -- reserved for NT
-    ++ [0] -- birth 1/100s of a second
+    ++ [fineTimeByte btime] -- 0..199 (hundrethds + 100 if on odd second)
     ++ bytes16 (timeWord btime)
     ++ bytes16 (dateWord bdate)
     ++ bytes16 (dateWord adate)
