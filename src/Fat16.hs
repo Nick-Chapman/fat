@@ -101,16 +101,6 @@ rmCommand vol longName dir = do
       zeroBytesInClusterChain vol cn
       clearFatChain vol cn
 
-{-
-_findEntryAddresses_OLD :: Vol -> String -> Dir -> M (Maybe ([Addr],Addr))
-_findEntryAddresses_OLD vol longName dir =
-  findEntryAddr vol longName dir >>= \case
-    Nothing -> pure Nothing
-    --TODO: super hacky: assumes long name in one entry, and that we dont cross sector
-    Just (si,so) -> pure $ Just ([ (si,so - 32) ], (si, so) )
--}
-
-
 startingClusterFromAddr :: Addr -> M CN
 startingClusterFromAddr (si,so) = fi <$> get16 si (so + 0x1A)
 
