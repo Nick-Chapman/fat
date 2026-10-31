@@ -14,7 +14,7 @@ module Fat16
 
 import Control.Exception (assert)
 import Control.Monad.IO.Class (liftIO)
-import Data.Bits ((.&.),(.|.),shiftL,rotateR)
+import Data.Bits ((.&.),rotateR)
 import Data.ByteString.Internal (c2w)
 import Data.Char (toUpper)
 import Data.List.Split (splitOn)
@@ -23,6 +23,7 @@ import Prelude hiding (interact)
 import TheDisk (M,sectorSize)
 import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,bytes16,bytes32,bytesString)
 import Volume (bytesPerDirEntry,Vol(..))
+import DateTime (Date,Time,dateWord,timeWord,wellKnownDate,wellKnownTime)
 
 data Entry = Entry { longName :: String, item :: Item }
 
@@ -400,8 +401,8 @@ makeStandardEntry startingCluster shortName thing = do
   let (fileSize,attrByte) = case thing of
         FileOfSize n -> (n, 0x20)
         Subdir -> (0, 0x10)
-  let date = Date { year = 1997, month = 12, day = 29 }
-  let time = Time { hour = 12, minute = 25, second = 02 }
+  let date = wellKnownDate
+  let time = wellKnownTime
   StandardEntry { shortName
                 , attrByte
                 , bdate = date
@@ -431,32 +432,6 @@ encodeStandardEntry e = do
 
 trunOrPadSpace :: Int -> String -> String
 trunOrPadSpace n s = take n (s ++ repeat ' ')
-
-data Date = Date
-  { year  :: Int -- (7 bits) 0..119 (1980..2099)
-  , month :: Int -- (4 bits) 1..12
-  , day   :: Int -- (5 bits) 1..31
-  }
-  deriving Show
-
-dateWord :: Date -> W16
-dateWord Date{year,month,day} =
-  (((fi year - 1980) `mod` 128) `shiftL` 9) .|.
-  ((fi month `mod` 16) `shiftL` 5) .|.
-  (fi day `mod` 32)
-
-data Time = Time
-  { hour   :: Int -- (5 bits) 0..23
-  , minute :: Int -- (6 bits) 0..59
-  , second :: Int -- (5 bits) 0..29 (two seconds)
-  }
-  deriving Show
-
-timeWord :: Time -> W16
-timeWord Time{hour,minute,second} =
-  ((fi hour `mod` 32) `shiftL` 11) .|.
-  ((fi minute `mod` 64) `shiftL` 5) .|.
-  (fi (second `div` 2) `mod` 32)
 
 _see :: Show a => a -> M ()
 _see = liftIO .print
