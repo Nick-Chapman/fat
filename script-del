@@ -12,5 +12,7 @@ rm minimal
 echo 444 > abcdefghijk234
 echo 555 > short
 
-rm short
-echo 666 > poo
+# overwrite
+echo 666 > short
+
+echo 777 > zzz

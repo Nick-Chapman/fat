@@ -120,7 +120,15 @@ execCom vol dt state@State{cwd} = \case
       Nothing -> pure state
       Just dir -> pure state { cwd = dir }
   EchoRedirect contents name -> do
-    echoRedirect vol dt (contents++"\n") name cwd
+    (lookupItem vol cwd name >>= \case
+        Just IDir{} -> do
+          errM (printf "%s: is a directory" name)
+          pure False
+        Just IFile{} -> do rmCommand vol name cwd; pure True
+        Nothing -> pure True
+      ) >>= \case
+      True -> echoRedirect vol dt (contents++"\n") name cwd
+      False -> pure ()
     pure state
   Touch name -> do
     touch vol dt name cwd
@@ -143,7 +151,9 @@ catFileAction vol file = do
 lookupSubDir :: Vol -> Dir -> Name -> M (Maybe Dir)
 lookupSubDir vol dir name =
   lookupItem vol dir name >>= \case
-    Nothing -> pure Nothing
+    Nothing -> do
+      errM (printf "no such item: " ++ name )
+      pure Nothing
     Just (IDir dir) -> pure (Just dir)
     Just (IFile{}) -> do
       errM (printf "not a directory:"  ++ name)
@@ -152,7 +162,9 @@ lookupSubDir vol dir name =
 lookupFile :: Vol -> Dir -> Name -> M (Maybe File)
 lookupFile vol dir name =
   lookupItem vol dir name >>= \case
-    Nothing -> pure Nothing
+    Nothing -> do
+      errM (printf "no such item: " ++ name )
+      pure Nothing
     Just (IFile file) -> pure (Just file)
     Just (IDir{}) -> do
       errM (printf "not a file: %s" name)
@@ -179,7 +191,7 @@ lookupItem vol dir sought = do
        ] of
     item:_ -> pure (Just item)
     [] -> do
-      errM (printf "no such item: " ++ sought )
+      --errM (printf "no such item: " ++ sought )
       pure Nothing
 
 errM :: String -> M ()
