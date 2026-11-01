@@ -3,13 +3,29 @@ module Volume
   ( bytesPerDirEntry
   , Vol(..)
   , getVolumeInfo
+  , CN(..), getLastAllocatedCN, setLastAllocatedCN
   )
 where
 
 import Control.Exception (assert)
+import Control.Monad.IO.Class (liftIO)
+import Data.IORef (IORef,newIORef,readIORef,writeIORef)
 import GetSet (get8,get16)
 import TheDisk (M,sectorSize)
 import Types (SectorIndex,W8,W16)
+
+-- Cluster Number
+newtype CN = CN W16 deriving (Num,Integral,Real,Enum,Ord,Eq,Show)
+
+getLastAllocatedCN :: Vol -> M CN
+getLastAllocatedCN vol = do
+  let VolumeInfo{lastAllocatedCN} = vol
+  liftIO $ readIORef lastAllocatedCN
+
+setLastAllocatedCN :: Vol -> CN -> M ()
+setLastAllocatedCN vol cn = do
+  let VolumeInfo{lastAllocatedCN} = vol
+  liftIO $ writeIORef lastAllocatedCN cn
 
 bytesPerDirEntry :: Int
 bytesPerDirEntry = 32
@@ -20,7 +36,8 @@ data Vol = VolumeInfo
   , fatBegin :: SectorIndex
   , rootDirBegin :: SectorIndex
   , clusterBegin :: SectorIndex
-  } deriving Show
+  , lastAllocatedCN :: IORef CN
+  } --deriving Show
 
 getVolumeInfo :: SectorIndex -> M Vol
 getVolumeInfo si = do
@@ -47,9 +64,12 @@ getVolumeInfo si = do
   let rootDirBegin = fatBegin + fromIntegral sectorsPerFat * fromIntegral numberOfFats
   let clusterBegin = rootDirBegin + fromIntegral sectorsForRootDir
 
+  lastAllocatedCN <- liftIO $ newIORef (CN 3)
+
   pure VolumeInfo { sectorsPerCluster
                   , sectorsPerFat
                   , fatBegin
                   , rootDirBegin
                   , clusterBegin
+                  , lastAllocatedCN
                   }

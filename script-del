@@ -2,14 +2,8 @@ touch birth
 
 echo 111 > xxx
 echo 222 > yyy
-
 cp /home/nic/code/minimal/README.md minimal
+echo 333 > zzz
 rm minimal
 
-#cp /home/nic/code/minimal/README.md minimal-aaa-bbb-ccc-ddddddddddddddd
-#rm minimal-aaa-bbb-ccc-ddddddddddddddd
-
-#echo 333 > zzz
-
-#cp /home/nic/code/bedlam-cube/README.md bedlam
-#rm bedlam
+echo 444 > name-over-13-long

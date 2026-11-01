@@ -18,12 +18,12 @@ import Data.Bits ((.&.),rotateR)
 import Data.ByteString.Internal (c2w)
 import Data.Char (toUpper)
 import Data.List.Split (splitOn)
+import DateTime (Date,Time,dateWord,timeWord,fineTimeByte)
 import GetSet (get8,get16,get32,set8,set16,set32,getBytes)
 import Prelude hiding (interact)
 import TheDisk (M,sectorSize)
 import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,bytes16,bytes32,bytesString)
-import Volume (bytesPerDirEntry,Vol(..))
-import DateTime (Date,Time,dateWord,timeWord,fineTimeByte)
+import Volume (bytesPerDirEntry,Vol(..),CN(..),getLastAllocatedCN,setLastAllocatedCN)
 
 data Entry = Entry { longName :: String, item :: Item }
 
@@ -54,16 +54,16 @@ echoRedirect vol dt contents longName dir = do
   let fileSize = fi (length contents)
   let entry = makeStandardEntry dt 0 (makeShort longName) (FileOfSize fileSize)
   let bytes = encodeEntry longName entry
-  -- to get byte match: nextFreeCluster; writeDirEntry
+  -- to get byte match: allocteCluster; writeDirEntry
   writeDirEntry vol bytes dir
-  cn <- nextFreeCluster vol
+  cn <- allocteCluster vol
   setStartingCluster vol longName cn dir
   writeBytesInClusterChain vol cn (bytesString contents)
 
 mkDir :: Vol -> (Date,Time) -> String -> Dir -> M ()
 mkDir vol dt longName dir = do
-  -- to get byte match: nextFreeCluster; writeDirEntry
-  cn <- nextFreeCluster vol
+  -- to get byte match: allocteCluster; writeDirEntry
+  cn <- allocteCluster vol
   let entry = makeStandardEntry dt cn (makeShort longName) Subdir
   let bytes = encodeEntry longName entry
   writeDirEntry vol bytes dir
@@ -199,14 +199,8 @@ findSubEntryAddr vol sought cn = loop "" cn 0
 ----------------------------------------------------------------------
 -- FAT
 
-nextFreeCluster :: Vol -> M CN
-nextFreeCluster vol = do
-  cn <- nextFreeCluster1 vol
-  --_see ("nextFreeCluster->",cn)
-  pure cn
-
-nextFreeCluster1 :: Vol -> M CN
-nextFreeCluster1 vol = loop (CN 3) -- 2 is always unused?
+allocteCluster :: Vol -> M CN
+allocteCluster vol = getLastAllocatedCN vol >>= loop
   where
     loop :: CN -> M CN
     loop cn = do
@@ -215,11 +209,9 @@ nextFreeCluster1 vol = loop (CN 3) -- 2 is always unused?
         then loop (cn+1)
         else
         do
-          markFinalCluster vol cn
+          setNextCluser vol cn 0xffff
+          setLastAllocatedCN vol cn
           pure cn
-
-markFinalCluster :: Vol -> CN -> M ()
-markFinalCluster vol cn = setNextCluser vol cn 0xffff
 
 setNextCluser :: Vol -> CN -> W16 -> M ()
 setNextCluser vol cn w16 = do
@@ -241,7 +233,7 @@ writeBytesInClusterChain vol cn = loop cn
       if length bytes <= sectorSize then writeSectorBytes si 0 bytes else do
         let (front,rest) = splitAt sectorSize bytes
         writeSectorBytes si 0 front
-        cn' <- nextFreeCluster vol
+        cn' <- allocteCluster vol
         setNextCluser vol cn (fi cn')
         loop cn' rest
 
@@ -323,7 +315,7 @@ nextCluster1 vol cn = do
     | cn' /= 0xffff -> do
         pure cn'
     | otherwise -> do
-        cn' <- nextFreeCluster vol
+        cn' <- allocteCluster vol
         --let cn' = 1 + cn'0
         setNextCluser vol cn (fi cn')
         pure cn'
@@ -558,8 +550,6 @@ data DirRecord = DirRecord
   , isDir :: Bool
   } deriving Show
 
--- Cluster Number
-newtype CN = CN W16 deriving (Num,Integral,Real,Enum,Ord,Eq,Show)
 
 data DirRecordKind = DRK_Normal | DRK_Long | DRK_Unused | DRK_EndOfDir
   deriving (Show,Eq)
