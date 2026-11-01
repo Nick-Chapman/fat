@@ -110,25 +110,33 @@ execCom vol dt state@State{cwd} = \case
     lsDirAction vol cwd
     pure state
   Cat name -> do
-    lookupFile vol cwd name >>= \case
-      Nothing -> pure state
-      Just file -> do
-        catFileAction vol file
-        pure state
+    lookupItem vol cwd name >>= \case
+      Nothing -> do
+        errM (printf "cat: %s: No such file or directory" name)
+      Just (IDir{}) -> do
+        errM (printf "cat: %s: Is a directory" name)
+      Just (IFile file) -> do
+        getFileContents vol file >>= liftIO . putStr
+    pure state
   Cd name -> do
-    lookupSubDir vol cwd name >>= \case
-      Nothing -> pure state
-      Just dir -> pure state { cwd = dir }
+    lookupItem vol cwd name >>= \case
+      Nothing -> do
+        errM (printf "cd: %s: No such file or directory" name )
+        pure state
+      Just (IFile{}) -> do
+        errM (printf "cd: %s: Not a directory" name)
+        pure state
+      Just (IDir dir) -> do
+        pure state { cwd = dir }
   EchoRedirect contents name -> do
-    (lookupItem vol cwd name >>= \case
-        Just IDir{} -> do
-          errM (printf "%s: is a directory" name)
-          pure False
-        Just IFile{} -> do rmCommand vol name cwd; pure True
-        Nothing -> pure True
-      ) >>= \case
-      True -> echoRedirect vol dt (contents++"\n") name cwd
-      False -> pure ()
+    let makeFile = echoRedirect vol dt (contents++"\n") name cwd
+    lookupItem vol cwd name >>= \case
+      Just IDir{} -> do
+        errM (printf "%s: is a directory" name)
+      Just IFile{} -> do
+        rmCommand vol name cwd
+        makeFile
+      Nothing -> makeFile
     pure state
   Touch name -> do
     touch vol dt name cwd
@@ -138,37 +146,15 @@ execCom vol dt state@State{cwd} = \case
     echoRedirect vol dt contents name cwd
     pure state
   Mkdir name -> do
-    mkDir vol dt name cwd
+    lookupItem vol cwd name >>= \case
+      Just{} -> do
+        errM (printf "mkdir: cannot create directory '%s': File exists" name)
+      Nothing -> do
+        mkDir vol dt name cwd
     pure state
   Rm name -> do
     rmCommand vol name cwd
     pure state
-
-catFileAction :: Vol -> File -> M ()
-catFileAction vol file = do
-  getFileContents vol file >>= liftIO . putStr
-
-lookupSubDir :: Vol -> Dir -> Name -> M (Maybe Dir)
-lookupSubDir vol dir name =
-  lookupItem vol dir name >>= \case
-    Nothing -> do
-      errM (printf "no such item: " ++ name )
-      pure Nothing
-    Just (IDir dir) -> pure (Just dir)
-    Just (IFile{}) -> do
-      errM (printf "not a directory:"  ++ name)
-      pure Nothing
-
-lookupFile :: Vol -> Dir -> Name -> M (Maybe File)
-lookupFile vol dir name =
-  lookupItem vol dir name >>= \case
-    Nothing -> do
-      errM (printf "no such item: " ++ name )
-      pure Nothing
-    Just (IFile file) -> pure (Just file)
-    Just (IDir{}) -> do
-      errM (printf "not a file: %s" name)
-      pure Nothing
 
 lsDirAction :: Vol -> Dir -> M ()
 lsDirAction vol dir = do
@@ -191,11 +177,10 @@ lookupItem vol dir sought = do
        ] of
     item:_ -> pure (Just item)
     [] -> do
-      --errM (printf "no such item: " ++ sought )
       pure Nothing
 
 errM :: String -> M ()
-errM s = liftIO $ putErr (col AN.Red "Error: " ++ s ++ "\n")
+errM s = liftIO $ putErr (col AN.Red s ++ "\n")
 
 runHL :: HL.InputT IO a -> IO a
 runHL = HL.runInputT HL.defaultSettings
