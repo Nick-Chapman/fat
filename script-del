@@ -1,5 +1,8 @@
 touch birth
 
+mkdir sub
+cd sub
+
 echo 111 > xxx
 echo 222 > yyy
 cp /home/nic/code/minimal/README.md minimal

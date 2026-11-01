@@ -109,38 +109,8 @@ zeroOutClusterAndSizeInfo (si,so) = do
   set16 si (so + 0x1A) 0 -- zero the startingCluster
   set32 si (so + 0x1C) 0 -- zero the file size
 
-clearFatChain :: Vol -> CN -> M ()
-clearFatChain vol = loop
-  where
-    loop :: CN -> M ()
-    loop cn = do
-      (si,so) <- cn2sio vol cn
-      cn' <- CN <$> get16 si so
-      set16 si so 0
-      let VolumeInfo{sectorsPerFat} = vol
-      set16 (si + fi sectorsPerFat) so 0 -- backup FAT
-      if cn' == 0xffff then pure () else loop cn'
-
-zeroBytesInClusterChain :: Vol -> CN -> M ()
-zeroBytesInClusterChain vol cn = loop cn
-  where
-    loop :: CN -> M ()
-    loop cn = do
-      let si = siFromClusterNumber vol cn
-      let bytes = replicate 512 0x0
-      writeSectorBytes si 0 bytes
-      cn' <- stepFatChain vol cn
-      if
-        | cn' == 0xffff -> do
-            pure ()
-        | otherwise -> do
-            loop cn'
-
-
 ----------------------------------------------------------------------
 -- FIND
-
-type Addr = (SectorIndex,SectorOffset)
 
 findEntryAddr :: Vol -> String -> Dir -> M (Maybe Addr)
 findEntryAddr vol sought = \case
@@ -192,31 +162,6 @@ findSubEntryAddr vol sought cn = loop "" cn 0
             DRK_Normal -> if
               | acc == sought -> pure (Just (si,so))
               | otherwise -> loop "" cn (i+1)
-
-----------------------------------------------------------------------
--- FAT
-
-allocteCluster :: Vol -> M CN
-allocteCluster vol = getLastAllocatedCN vol >>= loop
-  where
-    loop :: CN -> M CN
-    loop cn = do
-      cn' <- stepFatChain vol cn
-      if cn' /= 0
-        then loop (cn+1)
-        else
-        do
-          setNextCluser vol cn 0xffff
-          setLastAllocatedCN vol cn
-          pure cn
-
-setNextCluser :: Vol -> CN -> W16 -> M ()
-setNextCluser vol cn w16 = do
-  --_see ("setNextCluser",cn,"=",w16)
-  let VolumeInfo{sectorsPerFat} = vol
-  (si,so) <- cn2sio vol cn
-  set16 si so w16
-  set16 (si + fi sectorsPerFat) so w16 -- backup FAT
 
 ----------------------------------------------------------------------
 -- CONTENTS
@@ -276,19 +221,6 @@ writeSubDirEntryBytesAddr vol bytes cn (si,so) = do
     let si' = siFromClusterNumber vol cn'
     writeSectorBytes si' 0 rest
 
-
-nextCluster :: Vol -> CN -> M CN
-nextCluster vol cn = do
-  cn' <- stepFatChain vol cn
-  if
-    | cn' /= 0xffff -> do
-        pure cn'
-    | otherwise -> do
-        cn' <- allocteCluster vol
-        --let cn' = 1 + cn'0
-        setNextCluser vol cn (fi cn')
-        pure cn'
-
 findDirNextEntry :: Vol -> Int -> Dir -> M (Dir,Addr)
 findDirNextEntry vol size = \case
   Root -> do
@@ -320,19 +252,27 @@ findRootDirNextEntry VolumeInfo{rootDirBegin} size = loop0 (rootDirBegin,0)
               loop0 (si, so + fi bytesPerDirEntry)
 
 findSubDirNextEntry :: Vol -> Int -> CN -> M (CN,Addr)
-findSubDirNextEntry vol _size cn = loop cn (siFromClusterNumber vol cn) 0
+findSubDirNextEntry vol size cn = loop0 cn (siFromClusterNumber vol cn, 0)
   where
-    loop :: CN -> SectorIndex -> SectorOffset -> M (CN,Addr)
-    loop cn si so = if
+    loop0 :: CN -> Addr -> M (CN,Addr)
+    loop0 cn a = loop size (cn,a) cn a
+
+    loop :: Int -> (CN,Addr) -> CN -> Addr -> M (CN,Addr)
+    loop need candidateRes cn (si,so) = if
       | fi so >= sectorSize -> do
           cn' <- nextCluster vol cn
           let si' = siFromClusterNumber vol cn'
-          loop cn' si' 0
+          loop need candidateRes cn' (si', 0)
       | otherwise -> do
           DirRecord{kind} <- getDirRecord "" si so
           case kind of
             DRK_EndOfDir -> pure (cn,(si,so))
-            _ -> loop cn si (so + fi bytesPerDirEntry)
+            DRK_Unused -> do
+              if need == 1
+                then pure candidateRes
+                else loop (need-1) candidateRes cn (si, so + fi bytesPerDirEntry)
+            _ ->
+              loop0 cn (si, so + fi bytesPerDirEntry)
 
 
 ----------------------------------------------------------------------
@@ -536,25 +476,6 @@ getFileContents vol dr = do
           pure (start ++ rest)
   loop firstCluster (fi fileSize)
 
--- This become a big performace drain as the disk fill up.
--- TOOO: support some kind of FAT caching
-stepFatChain ::Vol -> CN -> M CN
-stepFatChain vol cn = do
-  (si,so) <- cn2sio vol cn
-  cn' <- CN <$> get16 si so
-  -- _see("stepFatChain",cn,(si,so),"-->",cn')
-  pure cn'
-
-cn2sio :: Vol -> CN -> M Addr
-cn2sio vol cn = do
-  let VolumeInfo{fatBegin} = vol
-  let bytePerChainWord :: Int = 2
-  let n = bytePerChainWord * fi cn
-  let si = fi (n `div` sectorSize) + fatBegin
-  let so = fi (n `mod` sectorSize)
-  --see ("cn2sio",cn,"->",si,so)
-  pure (si,so)
-
 data DirRecord = DirRecord
   { kind :: DirRecordKind
   , attr :: W8
@@ -628,7 +549,7 @@ dirSectors vol = \case
 rootSectors :: Vol -> [SectorIndex]
 rootSectors vol = do
   let VolumeInfo{rootDirBegin} = vol
-  let n = 1 -- TODO
+  let n = 1 -- TODO: this is a bug. make it blow up
   take n [rootDirBegin .. ]
 
 expandClusterChainFrom :: Vol -> CN -> M [SectorIndex]
@@ -640,15 +561,6 @@ expandClusterChainFrom vol = loop
         nextCN vol cn >>= \case
           Nothing -> pure []
           Just cn' -> loop cn'
-
--- This is the core computation...
-siFromClusterNumber :: Vol -> CN -> SectorIndex
-siFromClusterNumber vol cn = do
-  let VolumeInfo{sectorsPerCluster,clusterBegin} = vol
-  clusterBegin + (fi cn - 2) * fi sectorsPerCluster
-
-nextCN :: Vol -> CN -> M (Maybe CN)
-nextCN _ _ = undefined -- TODO
 
 entryAddressesAtSector :: SectorIndex -> [Addr] -- # (512/32 = 16)
 entryAddressesAtSector si = do
@@ -689,3 +601,103 @@ longAddr LongSlot{addr} = addr
 
 shortAddr :: ShortSlot -> Addr
 shortAddr ShortSlot{addr} = addr
+
+----------------------------------------------------------------------
+-- FAT
+
+nextCN :: Vol -> CN -> M (Maybe CN)
+nextCN vol cn = do
+  cn' <- stepFatChain vol cn
+  if
+    | cn' /= 0xffff -> do
+        pure Nothing
+    | otherwise -> do
+        pure (Just cn')
+
+nextCluster :: Vol -> CN -> M CN
+nextCluster vol cn = do
+  cn' <- stepFatChain vol cn
+  if
+    | cn' /= 0xffff -> do
+        pure cn'
+    | otherwise -> do
+        cn' <- allocteCluster vol
+        --let cn' = 1 + cn'0
+        setNextCluser vol cn (fi cn')
+        pure cn'
+
+-- This become a big performace drain as the disk fill up.
+-- TOOO: support some kind of FAT caching
+stepFatChain ::Vol -> CN -> M CN
+stepFatChain vol cn = do
+  (si,so) <- cn2sio vol cn
+  cn' <- CN <$> get16 si so
+  -- _see("stepFatChain",cn,(si,so),"-->",cn')
+  pure cn'
+
+allocteCluster :: Vol -> M CN
+allocteCluster vol = getLastAllocatedCN vol >>= loop
+  where
+    loop :: CN -> M CN
+    loop cn = do
+      cn' <- stepFatChain vol cn
+      if cn' /= 0
+        then loop (cn+1)
+        else
+        do
+          setNextCluser vol cn 0xffff
+          setLastAllocatedCN vol cn
+          pure cn
+
+clearFatChain :: Vol -> CN -> M ()
+clearFatChain vol = loop
+  where
+    loop :: CN -> M ()
+    loop cn = do
+      (si,so) <- cn2sio vol cn
+      cn' <- CN <$> get16 si so
+      set16 si so 0
+      let VolumeInfo{sectorsPerFat} = vol
+      set16 (si + fi sectorsPerFat) so 0 -- backup FAT
+      if cn' == 0xffff then pure () else loop cn'
+
+zeroBytesInClusterChain :: Vol -> CN -> M ()
+zeroBytesInClusterChain vol cn = loop cn
+  where
+    loop :: CN -> M ()
+    loop cn = do
+      let si = siFromClusterNumber vol cn
+      let bytes = replicate 512 0x0
+      writeSectorBytes si 0 bytes
+      cn' <- stepFatChain vol cn
+      if
+        | cn' == 0xffff -> do
+            pure ()
+        | otherwise -> do
+            loop cn'
+
+-- This is the core computation...
+siFromClusterNumber :: Vol -> CN -> SectorIndex
+siFromClusterNumber vol cn = do
+  let VolumeInfo{sectorsPerCluster,clusterBegin} = vol
+  clusterBegin + (fi cn - 2) * fi sectorsPerCluster
+
+setNextCluser :: Vol -> CN -> W16 -> M ()
+setNextCluser vol cn w16 = do
+  --_see ("setNextCluser",cn,"=",w16)
+  let VolumeInfo{sectorsPerFat} = vol
+  (si,so) <- cn2sio vol cn
+  set16 si so w16
+  set16 (si + fi sectorsPerFat) so w16 -- backup FAT
+
+type Addr = (SectorIndex,SectorOffset)
+
+cn2sio :: Vol -> CN -> M Addr
+cn2sio vol cn = do
+  let VolumeInfo{fatBegin} = vol
+  let bytePerChainWord :: Int = 2
+  let n = bytePerChainWord * fi cn
+  let si = fi (n `div` sectorSize) + fatBegin
+  let so = fi (n `mod` sectorSize)
+  --see ("cn2sio",cn,"->",si,so)
+  pure (si,so)
