@@ -16,3 +16,7 @@ echo 555 > short
 echo 666 > short
 
 echo 777 > zzz
+
+mkdir folder
+
+rmdir folder

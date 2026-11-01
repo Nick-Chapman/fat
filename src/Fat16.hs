@@ -9,10 +9,11 @@ module Fat16
   , echoRedirect
   , mkDir
   , touch
-  , rmCommand
+  , removeDirEntry
   ) where
 
 import Control.Exception (assert)
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Bits ((.&.),rotateR)
 import Data.ByteString.Internal (c2w)
@@ -86,16 +87,17 @@ setStartingCluster vol longName cn dir =
 ----------------------------------------------------------------------
 -- RM
 
-rmCommand :: Vol -> String -> Dir -> M ()
-rmCommand vol longName dir = do
+removeDirEntry :: Bool -> Vol -> String -> Dir -> M ()
+removeDirEntry zeroingContents vol longName dir = do
   findEntryAddresses vol longName dir >>= \case
     Nothing -> pure () -- nothing to remove
     Just (longAs,addr) -> do
       markEntryAddrUnused addr
       mapM_ markEntryAddrUnused longAs
       cn <- startingClusterFromAddr addr
-      zeroOutClusterAndSizeInfo addr
-      zeroBytesInClusterChain vol cn
+      when zeroingContents $ do
+        zeroOutClusterAndSizeInfo addr
+        zeroBytesInClusterChain vol cn
       clearFatChain vol cn
 
 startingClusterFromAddr :: Addr -> M CN

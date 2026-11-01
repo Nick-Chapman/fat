@@ -1,7 +1,7 @@
 module Browse (dump,interact) where
 
 import Control.Monad.IO.Class (liftIO)
-import Fat16 (Entry(..),Item(..),File(..),Dir(..),getDirEntries,getFileContents,echoRedirect,mkDir,touch,rmCommand)
+import Fat16 (Entry(..),Item(..),File(..),Dir(..),getDirEntries,getFileContents,echoRedirect,mkDir,touch,removeDirEntry)
 import FileTree (Tree(..),TreeEntry(..),printTree)
 import Prelude hiding (interact)
 import System.Console.ANSI qualified as AN
@@ -75,6 +75,7 @@ data Com
   | CopyIn FilePath Name
   | Mkdir Name
   | Rm Name
+  | Rmdir Name
 
 data ParseRes = Command Com | FailedToParse | ExitCommand
 
@@ -93,6 +94,7 @@ parseCom s =
     ["cp",path@('/':_),name] -> Command (CopyIn path name)
     ["mkdir",name] -> Command (Mkdir name)
     ["rm",name] -> Command (Rm name)
+    ["rmdir",name] -> Command (Rmdir name)
     _ -> FailedToParse
 
 type Name = String
@@ -134,7 +136,7 @@ execCom vol dt state@State{cwd} = \case
       Just IDir{} -> do
         errM (printf "%s: is a directory" name)
       Just IFile{} -> do
-        rmCommand vol name cwd
+        removeDirEntry True vol name cwd
         makeFile
       Nothing -> makeFile
     pure state
@@ -153,7 +155,22 @@ execCom vol dt state@State{cwd} = \case
         mkDir vol dt name cwd
     pure state
   Rm name -> do
-    rmCommand vol name cwd
+    lookupItem vol cwd name >>= \case
+      Nothing -> do
+        errM (printf "rm: cannot remove '%s': No such file or directory" name)
+      Just IDir{} -> do
+        errM (printf "rm: cannot remove '%s': Is a directory" name)
+      Just IFile{} -> do
+        removeDirEntry True vol name cwd
+    pure state
+  Rmdir name -> do
+    lookupItem vol cwd name >>= \case
+      Nothing -> do
+        errM (printf "rmdir: failed to remove '%s': No such file or directory" name)
+      Just IFile{} -> do
+        errM (printf "rmdir: failed to remove '%s': Not a directory" name)
+      Just IDir{} -> do
+        removeDirEntry False vol name cwd
     pure state
 
 lsDirAction :: Vol -> Dir -> M ()
