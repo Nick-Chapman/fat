@@ -11,20 +11,18 @@ import System.Console.Haskeline qualified as HL
 import System.IO (hFlush,hPutStrLn)
 import System.IO qualified as IO (stderr)
 import Text.Printf (printf)
-import Types(Vol)
 
 dump :: FilePath -> IO ()
 dump path = exec path $ do
-  let vol = undefined -- TODO
-  tree <- getTree vol
+  tree <- getTree
   liftIO $ printTree tree
 
-getTree :: Vol -> M Tree
-getTree vol = deepTree Root
+getTree :: M Tree
+getTree = deepTree Root
   where
     deepTree :: Dir -> M Tree
     deepTree dir = do
-      es <- getDirEntries vol dir
+      es <- getDirEntries dir
       binds <- sequence [ do treeEntry <- deepEntry item
                              pure (longName,treeEntry)
                         | Entry{longName,item} <- es
@@ -39,14 +37,13 @@ getTree vol = deepTree Root
         tree <- deepTree dir
         pure (ETree tree)
       IFile file -> do
-        contents <- getFileContents vol file
+        contents <- getFileContents file
         pure (EFile contents)
 
 interact :: Bool -> (Date,Time) -> FilePath -> IO ()
 interact showPrompt dt path = do
   let prompt = if showPrompt then (col AN.Green $ "> ") else ""
   exec path $ do
-    let vol = undefined -- TODO
     let
       loop :: State -> M ()
       loop state = do
@@ -60,7 +57,7 @@ interact showPrompt dt path = do
               ExitCommand -> do
                 pure ()
               Command com -> do
-                state <- execCom vol dt state com
+                state <- execCom dt state com
                 loop state
 
     loop state0
@@ -104,24 +101,24 @@ data State = State { cwd :: Dir }
 state0 :: State
 state0 = State { cwd = Root }
 
-execCom :: Vol -> (Date,Time) -> State -> Com -> M State
-execCom vol dt state@State{cwd} = \case
+execCom :: (Date,Time) -> State -> Com -> M State
+execCom dt state@State{cwd} = \case
   Null -> do
     pure state
   Ls -> do
-    lsDirAction vol cwd
+    lsDirAction cwd
     pure state
   Cat name -> do
-    lookupItem vol cwd name >>= \case
+    lookupItem cwd name >>= \case
       Nothing -> do
         errM (printf "cat: %s: No such file or directory" name)
       Just (IDir{}) -> do
         errM (printf "cat: %s: Is a directory" name)
       Just (IFile file) -> do
-        getFileContents vol file >>= liftIO . putStr
+        getFileContents file >>= liftIO . putStr
     pure state
   Cd name -> do
-    lookupItem vol cwd name >>= \case
+    lookupItem cwd name >>= \case
       Nothing -> do
         errM (printf "cd: %s: No such file or directory" name )
         pure state
@@ -131,50 +128,50 @@ execCom vol dt state@State{cwd} = \case
       Just (IDir dir) -> do
         pure state { cwd = dir }
   EchoRedirect contents name -> do
-    let makeFile = echoRedirect vol dt (contents++"\n") name cwd
-    lookupItem vol cwd name >>= \case
+    let makeFile = echoRedirect dt (contents++"\n") name cwd
+    lookupItem cwd name >>= \case
       Just IDir{} -> do
         errM (printf "%s: is a directory" name)
       Just IFile{} -> do
-        removeDirEntry True vol name cwd
+        removeDirEntry True name cwd
         makeFile
       Nothing -> makeFile
     pure state
   Touch name -> do
-    touch vol dt name cwd
+    touch dt name cwd
     pure state
   CopyIn path name -> do
     contents <- liftIO $ readFile path
-    echoRedirect vol dt contents name cwd
+    echoRedirect dt contents name cwd
     pure state
   Mkdir name -> do
-    lookupItem vol cwd name >>= \case
+    lookupItem cwd name >>= \case
       Just{} -> do
         errM (printf "mkdir: cannot create directory '%s': File exists" name)
       Nothing -> do
-        mkDir vol dt name cwd
+        mkDir dt name cwd
     pure state
   Rm name -> do
-    lookupItem vol cwd name >>= \case
+    lookupItem cwd name >>= \case
       Nothing -> do
         errM (printf "rm: cannot remove '%s': No such file or directory" name)
       Just IDir{} -> do
         errM (printf "rm: cannot remove '%s': Is a directory" name)
       Just IFile{} -> do
-        removeDirEntry True vol name cwd
+        removeDirEntry True name cwd
     pure state
   Rmdir name -> do
-    lookupItem vol cwd name >>= \case
+    lookupItem cwd name >>= \case
       Nothing -> do
         errM (printf "rmdir: failed to remove '%s': No such file or directory" name)
       Just IFile{} -> do
         errM (printf "rmdir: failed to remove '%s': Not a directory" name)
       Just IDir{} -> do
-        removeDirEntry False vol name cwd
+        removeDirEntry False name cwd
     pure state
 
-lsDirAction :: Vol -> Dir -> M ()
-lsDirAction vol dir = do
+lsDirAction :: Dir -> M ()
+lsDirAction dir = do
   let
     showEntry :: Entry -> IO ()
     showEntry Entry{longName,item} = case item of
@@ -182,12 +179,12 @@ lsDirAction vol dir = do
       IFile (File {fileSize}) ->
         printf "- %6i  %s\n" (fromIntegral fileSize :: Int) longName
 
-  es <- getDirEntries vol dir
+  es <- getDirEntries dir
   mapM_ (liftIO . showEntry) es
 
-lookupItem :: Vol -> Dir -> Name -> M (Maybe Item)
-lookupItem vol dir sought = do
-  es <- getDirEntries vol dir -- TODO: be incremental?
+lookupItem :: Dir -> Name -> M (Maybe Item)
+lookupItem dir sought = do
+  es <- getDirEntries dir -- TODO: be incremental?
   case [ item
        | Entry{longName,item} <- es
        , longName == sought
