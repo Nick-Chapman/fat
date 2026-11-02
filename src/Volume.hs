@@ -8,8 +8,6 @@ module Volume
 where
 
 import Control.Exception (assert)
-import Control.Monad.IO.Class (liftIO)
-import Data.IORef (newIORef)
 import Disk (M,sectorSize,newSector,loadIntoSector,readInSector)
 import Types (SectorIndex,CN(..),Vol(..),W8,W16,SectorOffset,HL(..),mk16)
 
@@ -54,12 +52,9 @@ getVolumeInfo si = do
   let rootDirBegin = fatBegin + fromIntegral sectorsPerFat * fromIntegral numberOfFats
   let clusterBegin = rootDirBegin + fromIntegral sectorsForRootDir
 
-  lastAllocatedCN <- liftIO $ newIORef (CN 2)
-
   pure VolumeInfo { sectorsPerCluster
                   , sectorsPerFat
                   , fatBegin
                   , rootDirBegin
                   , clusterBegin
-                  , lastAllocatedCN
                   }

@@ -12,7 +12,7 @@ module Fat16
   , removeDirEntry
   ) where
 
-import CachedDisk (M,sectorSize,volume)
+import CachedDisk (M,sectorSize,volume,getLastAllocatedCN)
 import Control.Exception (assert)
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
@@ -651,19 +651,19 @@ stepFatChain vol cn = do
   pure cn'
 
 
-getNextCandidateCN :: Vol -> M CN
-getNextCandidateCN _vol = do
-  VolumeInfo{lastAllocatedCN} <- volume
+getNextCandidateCN :: M CN
+getNextCandidateCN = do
+  lastAllocatedCN <- getLastAllocatedCN
   cn <- liftIO $ readIORef lastAllocatedCN
   pure (cn + 1)
 
-setLastAllocatedCN :: Vol -> CN -> M ()
-setLastAllocatedCN _vol cn = do
-  VolumeInfo{lastAllocatedCN} <- volume
+setLastAllocatedCN :: CN -> M ()
+setLastAllocatedCN cn = do
+  lastAllocatedCN <- getLastAllocatedCN
   liftIO $ writeIORef lastAllocatedCN cn
 
 allocteCluster :: Vol -> M CN
-allocteCluster vol = getNextCandidateCN vol >>= loop
+allocteCluster vol = getNextCandidateCN >>= loop
   where
     loop :: CN -> M CN
     loop cn = do
@@ -673,7 +673,7 @@ allocteCluster vol = getNextCandidateCN vol >>= loop
         else
         do
           setNextCluser vol cn 0xffff
-          setLastAllocatedCN vol cn
+          setLastAllocatedCN cn
           pure cn
 
 clearFatChain :: Vol -> CN -> M ()

@@ -11,7 +11,6 @@ module Types
 
 import Data.Bits (Bits)
 import Data.ByteString.Internal (w2c,c2w)
-import Data.IORef (IORef)
 import Data.Ix (Ix)
 import Data.Word (Word8,Word16,Word32)
 import Prelude hiding (interact)
@@ -63,7 +62,6 @@ bytes32 w = bytes16 lo ++ bytes16 hi where HL{lo,hi} = split32 w
 bytesString :: String -> [W8]
 bytesString str = [ fi (c2w c) | c <- str ]
 
-
 -- Cluster Number
 newtype CN = CN W16 deriving (Num,Integral,Real,Enum,Ord,Eq,Show)
 
@@ -73,5 +71,4 @@ data Vol = VolumeInfo
   , fatBegin :: SectorIndex
   , rootDirBegin :: SectorIndex
   , clusterBegin :: SectorIndex
-  , lastAllocatedCN :: IORef CN -- TODO: move this out of here
-  } --deriving Show -- so this can be reinstated
+  } deriving Show
