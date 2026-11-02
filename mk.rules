@@ -1,0 +1,25 @@
+#!/bin/sh
+
+for X in "$@"; do
+cat <<EOF
+
+$X.image $X.birth: run-script-on-image.sh empty.image script-$X
+  ./run-script-on-image.sh empty.image script-$X $X.image $X.birth
+
+h-$X.image : src/fat.exe empty.image script-$X $X.birth
+  cp empty.image empty.image.writable
+  chmod +w empty.image.writable
+  cat script-$X | ./fat.exe empty.image.writable -b \$\$(cat $X.birth) #>/dev/null
+  cp empty.image.writable h-$X.image
+
+$X.image.hd : $X.image
+  hd -v $X.image | head -20000 > $X.image.hd
+
+h-$X.image.hd : h-$X.image
+  hd -v h-$X.image | head -20000 > h-$X.image.hd
+
+*test-$X.diff : $X.image.hd h-$X.image.hd
+  diff $X.image.hd h-$X.image.hd
+
+EOF
+done

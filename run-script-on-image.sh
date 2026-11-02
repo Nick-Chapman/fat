@@ -16,9 +16,7 @@ here=$(pwd)
 mount $fs
 sleep 0
 
-# TODO: make it work, even without setting a referecne time...
 sudo unshare --time bash -c 'date -s "1997-12-29 12:25:02"' > /dev/null
-#sudo unshare --time bash -c 'date -s "2011-11-11 12:34:56"' > /dev/null
 (cd $fs; . $here/$script)
 sleep 0.1
 stat $fs/birth | grep Birth | cut -d' ' -f3- | cut -c1-22 > $birth
