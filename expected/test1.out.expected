@@ -29,5 +29,4 @@
 /d : "x\n"
 /e : "x\n"
 /empty : ""
-[#hitsR=2480,batchedW=0]
 [#loads=39, #saves=0, #slots=2]

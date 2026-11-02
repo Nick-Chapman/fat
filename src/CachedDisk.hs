@@ -13,7 +13,6 @@ import Control.Monad.IO.Class (MonadIO,liftIO)
 import Data.IORef (IORef,newIORef)
 import Disk (Sector,sectorSize)
 import Disk qualified
-import Text.Printf (printf)
 import Types (SectorIndex,SectorOffset,W8,CN(..))
 import Volume (Vol(..),getVolumeInfo)
 
@@ -52,8 +51,6 @@ data M a where
 data Cache = Cache
   { theSI:: SectorIndex
   , theSec :: Sector
-  , hitsR :: Int
-  , batchedW :: Int
   , dirty :: Bool
   }
 
@@ -61,7 +58,7 @@ initCache :: Disk.M Cache
 initCache = do
   let theSI = -1
   theSec <- Disk.newSector
-  pure Cache { theSI, theSec, hitsR = 0, batchedW = 0, dirty = False }
+  pure Cache { theSI, theSec, dirty = False }
 
 exec :: forall a. FilePath -> M a -> IO a
 exec path m0 = Disk.exec path do
@@ -70,9 +67,8 @@ exec path m0 = Disk.exec path do
   --liftIO $ print vol
   lastAllocatedCN <- liftIO $ newIORef (CN 2)
   let
-    k0 c@Cache{hitsR,batchedW} a = do
+    k0 c a = do
       flushCache c
-      liftIO (printf "[#hitsR=%d,batchedW=%d]\n" hitsR batchedW)
       pure a
     loop :: forall a b. Cache -> M a -> (Cache -> a -> Disk.M b) -> Disk.M b
     loop c = \case
@@ -101,17 +97,17 @@ flushCache Cache{theSI,theSec,dirty} = if
       pure ()
 
 saveSectorC :: Cache -> SectorIndex -> Sector -> Disk.M Cache
-saveSectorC c@Cache{theSI,batchedW} si sec = if
+saveSectorC c@Cache{theSI} si sec = if
   | si == theSI -> do
-      pure c { theSec = sec, dirty = True,  batchedW = 1 + batchedW }
+      pure c { theSec = sec, dirty = True }
   | otherwise -> do
       flushCache c
       pure c { theSec = sec, dirty = False }
 
 loadSectorC :: Cache -> SectorIndex -> Disk.M (Sector, Cache)
-loadSectorC c@Cache{theSI,theSec,hitsR} si = if
+loadSectorC c@Cache{theSI,theSec} si = if
   | si == theSI -> do
-      pure (theSec, c { hitsR = 1 + hitsR })
+      pure (theSec, c)
   | otherwise -> do
       flushCache c
       Disk.loadIntoSector si theSec

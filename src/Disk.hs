@@ -17,7 +17,7 @@ import GHC.IOArray (IOArray,newIOArray,readIOArray,writeIOArray)
 import System.Posix.IO.ByteString (OpenMode(..),OpenFileFlags(..),defaultFileFlags,openFd,closeFd,fdSeek,fdRead,fdWrite)
 import System.Posix.Types (Fd,ByteCount,FileOffset)
 import Text.Printf (printf)
-import Types (SectorIndex,SectorOffset(..),W8(..))
+import Types (SectorIndex,SectorOffset(..),W8(..),W16)
 
 sectorSize :: Int
 sectorSize = 512
@@ -93,8 +93,8 @@ exec path m0 = do
   let numLoads = sum (Map.elems loads)
   let numSaves = sum (Map.elems saves)
   printf "[#loads=%d, #saves=%d, #slots=%d]\n" numLoads numSaves countSlots
-  --print ("loads",[ (fromIntegral si :: W16,n) | (si,n) <- Map.toList loads, n > 1 ])
-  --print ("saves",[ (fromIntegral si :: W16,n) | (si,n) <- Map.toList saves, n > 1 ])
+  let _ = print ("loads",[ (fromIntegral si :: W16,n) | (si,n) <- Map.toList loads, n > 1 ])
+  let _ = print ("saves",[ (fromIntegral si :: W16,n) | (si,n) <- Map.toList saves, n > 1 ])
   pure a
 
 
