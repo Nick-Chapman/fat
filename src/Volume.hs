@@ -49,12 +49,14 @@ getVolumeInfo si = do
   let sectorsForRootDir = numberOfRootEntries `div` numberOfDirEntriesPerSector
 
   let fatBegin = si + fromIntegral numberReservedSectors
+  let fat2Begin = fatBegin + fromIntegral sectorsPerFat
   let rootDirBegin = fatBegin + fromIntegral sectorsPerFat * fromIntegral numberOfFats
   let clusterBegin = rootDirBegin + fromIntegral sectorsForRootDir
 
   pure VolumeInfo { sectorsPerCluster
                   , sectorsPerFat
                   , fatBegin
+                  , fat2Begin
                   , rootDirBegin
                   , clusterBegin
                   }

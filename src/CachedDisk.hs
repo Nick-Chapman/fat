@@ -60,34 +60,68 @@ initCache = do
   theSec <- Disk.newSector
   pure Cache { theSI, theSec, dirty = False }
 
+type CC = (Cache,Cache,Cache)
+
 exec :: forall a. FilePath -> M a -> IO a
 exec path m0 = Disk.exec path do
-  s0 <- initCache
   vol <- getVolumeInfo 0
   --liftIO $ print vol
   lastAllocatedCN <- liftIO $ newIORef (CN 2)
+
+  let VolumeInfo{fat2Begin,rootDirBegin} = vol
   let
-    k0 c a = do
-      flushCache c
+    inFat1 si = si < fat2Begin
+    inFat2 si = si < rootDirBegin
+
+  let
+    select :: SectorIndex -> (CC -> Cache, CC -> Cache -> CC)
+    select si = if
+      | inFat1 si -> do
+          let get (x,_,_) = x
+          let set (_,b,c) a = (a,b,c)
+          (get,set)
+      | inFat2 si -> do
+          let get (_,x,_) = x
+          let set (a,_,c) b = (a,b,c)
+          (get,set)
+      | otherwise -> do
+          let get (_,_,x) = x
+          let set (a,b,_) c = (a,b,c)
+          (get,set)
+
+  let
+    k0 (c1,c2,c3) a = do
+      flushCache c1
+      flushCache c2
+      flushCache c3
       pure a
-    loop :: forall a b. Cache -> M a -> (Cache -> a -> Disk.M b) -> Disk.M b
-    loop c = \case
-      Pure x -> \k -> k c x
-      Bind m f -> \k -> loop c m \c a -> loop c (f a) k
-      LiftDisk m -> \k -> m >>= k c
+    loop :: forall a b. CC -> M a -> (CC -> a -> Disk.M b) -> Disk.M b
+    loop cc = \case
+      Pure x -> \k -> k cc x
+      Bind m f -> \k -> loop cc m \cc a -> loop cc (f a) k
+      LiftDisk m -> \k -> m >>= k cc
       LoadSector si -> \k -> do
+        let (get,set) = select si
+        let c = get cc
         (sec,c) <- loadSectorC c si
-        k c sec
+        let cc' = set cc c
+        k cc' sec
       SaveSector si sec -> \k -> do
+        let (get,set) = select si
+        let c = get cc
         c <- saveSectorC c si sec
-        k c ()
+        let cc' = set cc c
+        k cc' ()
       Volume -> \k -> do
-        k c vol
+        k cc vol
       LastAllocatedCN -> \k -> do
-        k c lastAllocatedCN
+        k cc lastAllocatedCN
 
-  loop s0 m0 k0
-
+  c1 <- initCache
+  c2 <- initCache
+  c3 <- initCache
+  let cc = (c1,c2,c3)
+  loop cc m0 k0
 
 flushCache :: Cache -> Disk.M ()
 flushCache Cache{theSI,theSec,dirty} = if

@@ -29,4 +29,4 @@
 /d : "x\n"
 /e : "x\n"
 /empty : ""
-[#loads=39, #saves=0, #slots=2]
+[#loads=37, #saves=0, #slots=4]

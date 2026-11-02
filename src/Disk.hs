@@ -6,7 +6,7 @@ module Disk
   , readInSector, writeInSector
   ) where
 
-import Control.Monad (ap,liftM)
+import Control.Monad (ap,liftM,when)
 import Control.Monad.IO.Class (MonadIO,liftIO)
 import Data.ByteString qualified as B
 import Data.ByteString qualified as BS (fromFilePath)
@@ -93,8 +93,9 @@ exec path m0 = do
   let numLoads = sum (Map.elems loads)
   let numSaves = sum (Map.elems saves)
   printf "[#loads=%d, #saves=%d, #slots=%d]\n" numLoads numSaves countSlots
-  let _ = print ("loads",[ (fromIntegral si :: W16,n) | (si,n) <- Map.toList loads, n > 1 ])
-  let _ = print ("saves",[ (fromIntegral si :: W16,n) | (si,n) <- Map.toList saves, n > 1 ])
+  when False $ do
+    print ("loads",[ (fromIntegral si :: W16,n) | (si,n) <- Map.toList loads, n > 1 ])
+    print ("saves",[ (fromIntegral si :: W16,n) | (si,n) <- Map.toList saves, n > 1 ])
   pure a
 
 

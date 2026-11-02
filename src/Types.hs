@@ -69,6 +69,7 @@ data Vol = VolumeInfo
   { sectorsPerCluster :: W8
   , sectorsPerFat :: W16
   , fatBegin :: SectorIndex
+  , fat2Begin :: SectorIndex
   , rootDirBegin :: SectorIndex
   , clusterBegin :: SectorIndex
   } deriving Show
