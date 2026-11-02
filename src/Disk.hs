@@ -92,9 +92,9 @@ exec path m0 = do
   (a,Tracking{loads,saves,countSlots}) <- go initTracking m0
   let numLoads = sum (Map.elems loads)
   let numSaves = sum (Map.elems saves)
-  --let _numRepeats = numLoads - length (Map.keys loads)
-  --let _hist = [ (fromIntegral si :: W16,n) | (si,n) <- Map.toList loads, n > 1 ]
   printf "[#loads=%d, #saves=%d, #slots=%d]\n" numLoads numSaves countSlots
+  --print ("loads",[ (fromIntegral si :: W16,n) | (si,n) <- Map.toList loads, n > 1 ])
+  --print ("saves",[ (fromIntegral si :: W16,n) | (si,n) <- Map.toList saves, n > 1 ])
   pure a
 
 

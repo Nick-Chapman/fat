@@ -4,7 +4,7 @@ module GetSet
   , set8, set16, set32
   ) where
 
-import TheDisk (M, loadSector, saveSector, readInSector, writeInSector)
+import CachedDisk (M, loadSector, saveSector, readInSector, writeInSector)
 import Types (HL(..),SectorIndex,SectorOffset,W8,W16,W32,mk16,mk32,split16,split32)
 
 get32 :: SectorIndex -> SectorOffset -> M W32

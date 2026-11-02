@@ -1,6 +1,8 @@
 module Browse (dump,interact) where
 
+import CachedDisk (M,exec)
 import Control.Monad.IO.Class (liftIO)
+import DateTime (Date,Time)
 import Fat16 (Entry(..),Item(..),File(..),Dir(..),getDirEntries,getFileContents,echoRedirect,mkDir,touch,removeDirEntry)
 import FileTree (Tree(..),TreeEntry(..),printTree)
 import Prelude hiding (interact)
@@ -9,13 +11,11 @@ import System.Console.Haskeline qualified as HL
 import System.IO (hFlush,hPutStrLn)
 import System.IO qualified as IO (stderr)
 import Text.Printf (printf)
-import TheDisk (M,exec)
-import Volume (Vol,getVolumeInfo)
-import DateTime (Date,Time)
+import Types(Vol)
 
 dump :: FilePath -> IO ()
 dump path = exec path $ do
-  vol <- getVolumeInfo 0
+  let vol = undefined -- TODO
   tree <- getTree vol
   liftIO $ printTree tree
 
@@ -46,7 +46,7 @@ interact :: Bool -> (Date,Time) -> FilePath -> IO ()
 interact showPrompt dt path = do
   let prompt = if showPrompt then (col AN.Green $ "> ") else ""
   exec path $ do
-    vol <- getVolumeInfo 0
+    let vol = undefined -- TODO
     let
       loop :: State -> M ()
       loop state = do

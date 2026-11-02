@@ -4,6 +4,7 @@ module CachedDisk
   , Sector, sectorSize
   , loadSector, saveSector
   , readInSector, writeInSector
+  , volume
   ) where
 
 import Control.Monad (ap,liftM)
@@ -12,11 +13,15 @@ import Disk (Sector,sectorSize)
 import Disk qualified
 import Text.Printf (printf)
 import Types (SectorIndex,SectorOffset,W8)
+import Volume (Vol,getVolumeInfo)
 
 instance Functor M where fmap = liftM
 instance Applicative M where pure = Pure; (<*>) = ap
 instance Monad M where (>>=) = Bind
 instance MonadIO M where liftIO = LiftDisk . liftIO
+
+volume :: M Vol
+volume = Volume
 
 loadSector :: SectorIndex -> M Sector
 loadSector = LoadSector
@@ -36,6 +41,7 @@ data M a where
   LiftDisk :: Disk.M a -> M a
   LoadSector :: SectorIndex -> M Sector
   SaveSector :: SectorIndex -> Sector -> M ()
+  Volume :: M Vol
 
 data Cache = Cache
   { theSI:: SectorIndex
@@ -54,17 +60,19 @@ initCache = do
 exec :: forall a. FilePath -> M a -> IO a
 exec path m0 = Disk.exec path do
   s0 <- initCache
-  res <- loop s0 m0 k0
+  vol <- getVolumeInfo 0 --sector index 0
+  --liftIO $ print vol
+  res <- loop vol s0 m0 k0
   pure res
   where
     k0 c@Cache{hitsR,batchedW} a = do
       flushCache c
       liftIO (printf "[#hitsR=%d,batchedW=%d]\n" hitsR batchedW)
       pure a
-    loop :: forall a b. Cache -> M a -> (Cache -> a -> Disk.M b) -> Disk.M b
-    loop c = \case
+    loop :: forall a b. Vol -> Cache -> M a -> (Cache -> a -> Disk.M b) -> Disk.M b
+    loop vol c = \case
       Pure x -> \k -> k c x
-      Bind m f -> \k -> loop c m \c a -> loop c (f a) k
+      Bind m f -> \k -> loop vol c m \c a -> loop vol c (f a) k
       LiftDisk m -> \k -> m >>= k c
       LoadSector si -> \k -> do
         (sec,c) <- loadSectorC c si
@@ -72,6 +80,8 @@ exec path m0 = Disk.exec path do
       SaveSector si sec -> \k -> do
         c <- saveSectorC c si sec
         k c ()
+      Volume -> \k -> do
+        k c vol
 
 flushCache :: Cache -> Disk.M ()
 flushCache Cache{theSI,theSec,dirty} = if

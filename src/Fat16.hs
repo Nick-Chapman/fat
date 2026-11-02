@@ -12,19 +12,22 @@ module Fat16
   , removeDirEntry
   ) where
 
+import CachedDisk (M,sectorSize,volume)
 import Control.Exception (assert)
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Bits ((.&.),rotateR)
 import Data.ByteString.Internal (c2w)
 import Data.Char (toUpper)
+import Data.IORef (readIORef,writeIORef)
 import Data.List.Split (splitOn)
 import DateTime (Date,Time,dateWord,timeWord,fineTimeByte)
 import GetSet (get8,get16,get32,set8,set16,set32,getBytes)
 import Prelude hiding (interact)
-import TheDisk (M,sectorSize)
 import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,bytes16,bytes32,bytesString)
-import Volume (bytesPerDirEntry,Vol(..),CN(..),getNextCandidateCN,setLastAllocatedCN)
+import Volume (bytesPerDirEntry,Vol(..),CN(..))
+
+-- TODO: stop passing Vol everywhere
 
 data Entry = Entry { longName :: String, item :: Item }
 
@@ -120,7 +123,9 @@ findEntryAddr vol sought = \case
   Sub cn -> findSubEntryAddr vol sought cn
 
 findRootEntryAddr :: Vol -> String -> M (Maybe Addr)
-findRootEntryAddr VolumeInfo{rootDirBegin} sought = loop "" rootDirBegin 0
+findRootEntryAddr _vol sought = do
+  VolumeInfo{rootDirBegin} <- volume
+  loop "" rootDirBegin 0
   where
     loop :: String -> SectorIndex -> Int -> M (Maybe Addr)
     loop acc si i = if
@@ -142,17 +147,18 @@ findRootEntryAddr VolumeInfo{rootDirBegin} sought = loop "" rootDirBegin 0
 findSubEntryAddr :: Vol -> String -> CN -> M (Maybe Addr)
 findSubEntryAddr vol sought cn = loop "" cn 0
   where
-    VolumeInfo{sectorsPerCluster} = vol
-    recordsPerCluster = 16 * fromIntegral sectorsPerCluster
     loop :: String -> CN -> Int -> M (Maybe Addr)
-    loop acc cn i = if
+    loop acc cn i = do
+     VolumeInfo{sectorsPerCluster} <- volume
+     let recordsPerCluster = 16 * fromIntegral sectorsPerCluster
+     if
       | i >= recordsPerCluster -> do
           cn' <- stepFatChain vol cn
           if
             | (cn' /= 0xffff) ->  loop acc cn' 0
             | otherwise -> pure Nothing
       | otherwise -> do
-          let si = siFromClusterNumber vol cn -- TODO: avoid repeat each step
+          si <- siFromClusterNumber vol cn -- TODO: avoid repeat each step
           let so = fi (bytesPerDirEntry * i)
           DirRecord{kind} <- getDirRecord acc si so
           case kind of
@@ -173,7 +179,7 @@ writeBytesInClusterChain vol cn = loop cn
   where
     loop :: CN -> [W8] -> M ()
     loop cn bytes = do
-      let si = siFromClusterNumber vol cn
+      si <- siFromClusterNumber vol cn
       if length bytes <= sectorSize then writeSectorBytes si 0 bytes else do
         let (front,rest) = splitAt sectorSize bytes
         writeSectorBytes si 0 front
@@ -220,7 +226,7 @@ writeSubDirEntryBytesAddr vol bytes cn (si,so) = do
     assert (length rest <= sectorSize) $ do -- assert not
     writeSectorBytes si so front
     cn' <- nextCluster vol cn
-    let si' = siFromClusterNumber vol cn'
+    si' <- siFromClusterNumber vol cn'
     writeSectorBytes si' 0 rest
 
 findDirNextEntry :: Vol -> Int -> Dir -> M (Dir,Addr)
@@ -233,7 +239,9 @@ findDirNextEntry vol size = \case
     pure (Sub cn, addr)
 
 findRootDirNextEntry :: Vol -> Int -> M Addr
-findRootDirNextEntry VolumeInfo{rootDirBegin} size = loop0 (rootDirBegin,0)
+findRootDirNextEntry _vol size = do
+  VolumeInfo{rootDirBegin} <- volume
+  loop0 (rootDirBegin,0)
   where
     loop0 :: Addr -> M Addr
     loop0 addr = loop size addr addr
@@ -254,7 +262,9 @@ findRootDirNextEntry VolumeInfo{rootDirBegin} size = loop0 (rootDirBegin,0)
               loop0 (si, so + fi bytesPerDirEntry)
 
 findSubDirNextEntry :: Vol -> Int -> CN -> M (CN,Addr)
-findSubDirNextEntry vol size cn = loop0 cn (siFromClusterNumber vol cn, 0)
+findSubDirNextEntry vol size cn = do
+  si <- siFromClusterNumber vol cn
+  loop0 cn (si, 0)
   where
     loop0 :: CN -> Addr -> M (CN,Addr)
     loop0 cn a = loop size (cn,a) cn a
@@ -263,7 +273,7 @@ findSubDirNextEntry vol size cn = loop0 cn (siFromClusterNumber vol cn, 0)
     loop need candidateRes cn (si,so) = if
       | fi so >= sectorSize -> do
           cn' <- nextCluster vol cn
-          let si' = siFromClusterNumber vol cn'
+          si' <- siFromClusterNumber vol cn'
           loop need candidateRes cn' (si', 0)
       | otherwise -> do
           DirRecord{kind} <- getDirRecord "" si so
@@ -391,7 +401,9 @@ getDirInfo vol = \case
   Sub cn -> getSubDirInfo vol cn
 
 getRootDirInfo :: Vol -> M [DirRecord]
-getRootDirInfo VolumeInfo{rootDirBegin} = loop "" rootDirBegin 0
+getRootDirInfo _vol = do
+  VolumeInfo{rootDirBegin} <- volume
+  loop "" rootDirBegin 0
   where
     loop :: String -> SectorIndex -> Int -> M [DirRecord]
     loop acc si i = if
@@ -413,10 +425,11 @@ getRootDirInfo VolumeInfo{rootDirBegin} = loop "" rootDirBegin 0
 getSubDirInfo :: Vol -> CN -> M [DirRecord]
 getSubDirInfo vol cn = loop "" cn 0
   where
-    VolumeInfo{sectorsPerCluster} = vol
-    recordsPerCluster = 16 * fromIntegral sectorsPerCluster
     loop :: String -> CN -> Int -> M [DirRecord]
-    loop acc cn i = if
+    loop acc cn i = do
+     VolumeInfo{sectorsPerCluster} <- volume
+     let recordsPerCluster = 16 * fromIntegral sectorsPerCluster
+     if
       | i >= recordsPerCluster -> do
           cn' <- stepFatChain vol cn
           if
@@ -425,7 +438,7 @@ getSubDirInfo vol cn = loop "" cn 0
             | otherwise -> do
                 pure []
       | otherwise -> do
-          let si = siFromClusterNumber vol cn -- TODO: avoid repeat each step
+          si <- siFromClusterNumber vol cn -- TODO: avoid repeat each step
           let so = fi (bytesPerDirEntry * i)
           dr@DirRecord{kind} <- getDirRecord acc si so
           case kind of
@@ -460,17 +473,17 @@ getDirRecord acc si so = do
 
 getFileContents :: Vol -> File -> M String
 getFileContents vol dr = do
-  let VolumeInfo{sectorsPerCluster} = vol
+  VolumeInfo{sectorsPerCluster} <- volume
   let File{fileSize,firstCluster} = dr
   let clusterSize = sectorSize * fi sectorsPerCluster
   let
     loop :: CN -> Int -> M String
     loop cn size = if
       | size <= clusterSize -> do
-          let si = siFromClusterNumber vol cn
+          si <- siFromClusterNumber vol cn
           map toChar <$> getBytes si 0 (fi size)
       | otherwise -> do
-          let si = siFromClusterNumber vol cn
+          si <- siFromClusterNumber vol cn
           start <- map toChar <$> getBytes si 0 clusterSize
           cn' <- stepFatChain vol cn
           assert (cn' /= 0xffff) $ do
@@ -545,20 +558,20 @@ dirEntryAdresses vol dir = do
 
 dirSectors :: Vol -> Dir -> M [SectorIndex]
 dirSectors vol = \case
-  Root -> pure $ rootSectors vol
+  Root -> rootSectors vol
   Sub cn -> expandClusterChainFrom vol cn
 
-rootSectors :: Vol -> [SectorIndex]
-rootSectors vol = do
-  let VolumeInfo{rootDirBegin} = vol
+rootSectors :: Vol -> M [SectorIndex]
+rootSectors _vol = do
+  VolumeInfo{rootDirBegin} <- volume
   let n = 1 -- TODO: this is a bug. make it blow up
-  take n [rootDirBegin .. ]
+  pure $ take n [rootDirBegin .. ]
 
 expandClusterChainFrom :: Vol -> CN -> M [SectorIndex]
 expandClusterChainFrom vol = loop
   where
     loop cn = do
-      let si = siFromClusterNumber vol cn
+      si <- siFromClusterNumber vol cn
       (si:) <$> do
         nextCN vol cn >>= \case
           Nothing -> pure []
@@ -637,6 +650,18 @@ stepFatChain vol cn = do
   -- _see("stepFatChain",cn,(si,so),"-->",cn')
   pure cn'
 
+
+getNextCandidateCN :: Vol -> M CN
+getNextCandidateCN _vol = do
+  VolumeInfo{lastAllocatedCN} <- volume
+  cn <- liftIO $ readIORef lastAllocatedCN
+  pure (cn + 1)
+
+setLastAllocatedCN :: Vol -> CN -> M ()
+setLastAllocatedCN _vol cn = do
+  VolumeInfo{lastAllocatedCN} <- volume
+  liftIO $ writeIORef lastAllocatedCN cn
+
 allocteCluster :: Vol -> M CN
 allocteCluster vol = getNextCandidateCN vol >>= loop
   where
@@ -659,7 +684,7 @@ clearFatChain vol = loop
       (si,so) <- cn2sio vol cn
       cn' <- CN <$> get16 si so
       set16 si so 0
-      let VolumeInfo{sectorsPerFat} = vol
+      VolumeInfo{sectorsPerFat} <- volume
       set16 (si + fi sectorsPerFat) so 0 -- backup FAT
       if cn' == 0xffff then pure () else loop cn'
 
@@ -668,7 +693,7 @@ zeroBytesInClusterChain vol cn = loop cn
   where
     loop :: CN -> M ()
     loop cn = do
-      let si = siFromClusterNumber vol cn
+      si <- siFromClusterNumber vol cn
       let bytes = replicate 512 0x0
       writeSectorBytes si 0 bytes
       cn' <- stepFatChain vol cn
@@ -679,15 +704,15 @@ zeroBytesInClusterChain vol cn = loop cn
             loop cn'
 
 -- This is the core computation...
-siFromClusterNumber :: Vol -> CN -> SectorIndex
-siFromClusterNumber vol cn = do
-  let VolumeInfo{sectorsPerCluster,clusterBegin} = vol
-  clusterBegin + (fi cn - 2) * fi sectorsPerCluster
+siFromClusterNumber :: Vol -> CN -> M SectorIndex
+siFromClusterNumber _vol cn = do
+  VolumeInfo{sectorsPerCluster,clusterBegin} <- volume
+  pure $ clusterBegin + (fi cn - 2) * fi sectorsPerCluster
 
 setNextCluser :: Vol -> CN -> W16 -> M ()
 setNextCluser vol cn w16 = do
   --_see ("setNextCluser",cn,"=",w16)
-  let VolumeInfo{sectorsPerFat} = vol
+  VolumeInfo{sectorsPerFat} <- volume
   (si,so) <- cn2sio vol cn
   set16 si so w16
   set16 (si + fi sectorsPerFat) so w16 -- backup FAT
@@ -695,8 +720,8 @@ setNextCluser vol cn w16 = do
 type Addr = (SectorIndex,SectorOffset)
 
 cn2sio :: Vol -> CN -> M Addr
-cn2sio vol cn = do
-  let VolumeInfo{fatBegin} = vol
+cn2sio _vol cn = do
+  VolumeInfo{fatBegin} <- volume
   let bytePerChainWord :: Int = 2
   let n = bytePerChainWord * fi cn
   let si = fi (n `div` sectorSize) + fatBegin
