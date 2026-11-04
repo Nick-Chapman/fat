@@ -28,9 +28,7 @@ import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,bytes16,bytes32,bytesSt
 import Volume (bytesPerDirEntry,Vol(..),CN(..))
 
 data Entry = Entry { longName :: String, item :: Item }
-
 data Item = IDir Dir | IFile File
-
 data Dir = Root | Sub { firstCluster :: CN }
 data File = File { fileSize :: W32, firstCluster :: CN }
 
@@ -85,6 +83,7 @@ setStartingCluster longName cn dir =
     Just (si,so) -> do
       set16 si (so + 0x1A) (fi cn) -- Ox1A is offset of start-cluster in normal entry
 
+
 ----------------------------------------------------------------------
 -- RM
 
@@ -115,8 +114,8 @@ zeroOutClusterAndSizeInfo (si,so) = do
 ----------------------------------------------------------------------
 -- FIND
 
-findEntryAddr :: String -> Dir -> M (Maybe Addr)
-findEntryAddr sought = \case
+{-_old_findEntryAddr :: String -> Dir -> M (Maybe Addr) -- TODO: kill
+_old_findEntryAddr sought = \case
   Root -> findRootEntryAddr sought
   Sub cn -> findSubEntryAddr sought cn
 
@@ -151,10 +150,10 @@ findSubEntryAddr sought cn = loop "" cn 0
      let recordsPerCluster = 16 * fromIntegral sectorsPerCluster
      if
       | i >= recordsPerCluster -> do
-          cn' <- stepFatChain cn
-          if
-            | (cn' /= 0xffff) ->  loop acc cn' 0
-            | otherwise -> pure Nothing
+          stepFatChainL "findSubEntryAddr" cn >>= \case
+            Link_UnAllocated -> error "findSubEntryAddr/UnAllocated"
+            Link_EndOfChain -> pure Nothing
+            Link_NextCluster cn' -> loop acc cn' 0
       | otherwise -> do
           si <- siFromClusterNumber cn -- TODO: avoid repeat each step
           let so = fi (bytesPerDirEntry * i)
@@ -168,7 +167,7 @@ findSubEntryAddr sought cn = loop "" cn 0
             DRK_Normal -> if
               | acc == sought -> pure (Just (si,so))
               | otherwise -> loop "" cn (i+1)
-
+-}
 ----------------------------------------------------------------------
 -- CONTENTS
 
@@ -388,7 +387,7 @@ trunOrPadSpace :: Int -> String -> String
 trunOrPadSpace n s = take n (s ++ repeat ' ')
 
 _see :: Show a => a -> M ()
-_see = liftIO .print
+_see = liftIO .print -- TODO: kill comments out debug all over
 
 fi :: (Integral a, Num b) => a -> b
 fi x = fromIntegral x
@@ -429,12 +428,10 @@ getSubDirInfo cn = loop "" cn 0
      let recordsPerCluster = 16 * fromIntegral sectorsPerCluster
      if
       | i >= recordsPerCluster -> do
-          cn' <- stepFatChain cn
-          if
-            | cn' /= 0xffff -> do
-                loop acc cn' 0
-            | otherwise -> do
-                pure []
+          stepFatChainL "getSubDirInfo" cn >>= \case
+            Link_UnAllocated -> error "getSubDirInfo/UnAllocated"
+            Link_EndOfChain -> pure []
+            Link_NextCluster cn' -> loop acc cn' 0
       | otherwise -> do
           si <- siFromClusterNumber cn -- TODO: avoid repeat each step
           let so = fi (bytesPerDirEntry * i)
@@ -483,10 +480,12 @@ getFileContents dr = do
       | otherwise -> do
           si <- siFromClusterNumber cn
           start <- map toChar <$> getBytes si 0 clusterSize
-          cn' <- stepFatChain cn
-          assert (cn' /= 0xffff) $ do
-          rest <- loop cn' (size - clusterSize)
-          pure (start ++ rest)
+          stepFatChainL "getFileContents" cn >>= \case
+            Link_UnAllocated -> error "getFileContents/UnAllocated"
+            Link_EndOfChain -> error "getFileContents/EndOfChain"
+            Link_NextCluster cn' -> do
+              rest <- loop cn' (size - clusterSize)
+              pure (start ++ rest)
   loop firstCluster (fi fileSize)
 
 data DirRecord = DirRecord
@@ -506,6 +505,20 @@ data DirRecordKind = DRK_Normal | DRK_Long | DRK_Unused | DRK_EndOfDir
 ----------------------------------------------------------------------
 -- new directory stuff -- TODO: make this subsume all previous dir decodin
 
+{-data Switch = Old | New
+switch :: Switch
+switch = New
+findEntryAddr :: String -> Dir -> M (Maybe Addr)
+findEntryAddr = case switch of Old -> _old_findEntryAddr; New -> _new_findEntryAddr
+-}
+
+findEntryAddr :: String -> Dir -> M (Maybe Addr)
+findEntryAddr sought dir =
+  findEntryAddresses sought dir >>= pure . \case
+    Nothing -> Nothing
+    Just (_,addr) -> Just addr
+
+
 findEntryAddresses :: String -> Dir -> M (Maybe ([Addr],Addr))
 findEntryAddresses sought dir = do
   findSlotGroup sought dir >>= \case
@@ -515,13 +528,19 @@ findEntryAddresses sought dir = do
 
 findSlotGroup :: String -> Dir -> M (Maybe SlotGroup)
 findSlotGroup sought dir = do
+  slots <- dirEntrySlots dir
+  --liftIO $ print "slots..."
+  --liftIO $ mapM_ print slots
+  let groups = groupSlots slots
+  --liftIO $ print "grouped..."
+  --liftIO $ mapM_ print groups
   let
     loop :: [SlotGroup] -> Maybe SlotGroup
     loop = \case
       [] -> Nothing
       g:gs -> if longNameOfGroup g == sought then Just g else loop gs
-  slots <- dirEntrySlots dir
-  pure $ loop (groupSlots slots)
+  let res = loop groups
+  pure res
 
 type SlotGroup = ([LongSlot],ShortSlot)
 
@@ -539,7 +558,8 @@ groupSlots = loop []
         case slot of
           ES_Long long -> loop (long:longs) slots
           ES_Short short -> (reverse longs, short) : loop [] slots
-          ES_Open{} -> undefined -- TODO
+          --ES_Open{} -> undefined -- TODO -- FInally here now
+          ES_Open{} -> loop longs slots -- just do minimal thing for now
           ES_OpenEnd -> do
             assert (case longs of [] -> True; _ -> False) $ do
             []
@@ -552,6 +572,7 @@ dirEntrySlots dir = do
 dirEntryAdresses :: Dir -> M [Addr]
 dirEntryAdresses dir = do
   sis <- dirSectors dir
+  --liftIO $ print ("dirSectors", sis) --TODO
   pure [ addr | si <- sis, addr <- entryAddressesAtSector si ]
 
 dirSectors :: Dir -> M [SectorIndex]
@@ -561,8 +582,8 @@ dirSectors = \case
 
 rootSectors :: M [SectorIndex]
 rootSectors = do
-  VolumeInfo{rootDirBegin} <- volume
-  let n = 1 -- TODO: this is a bug. make it blow up
+  VolumeInfo{rootDirBegin,clusterBegin} <- volume
+  let n = fromIntegral (clusterBegin - rootDirBegin)
   pure $ take n [rootDirBegin .. ]
 
 expandClusterChainFrom :: CN -> M [SectorIndex]
@@ -571,9 +592,10 @@ expandClusterChainFrom = loop
     loop cn = do
       si <- siFromClusterNumber cn
       (si:) <$> do
-        nextCN cn >>= \case
-          Nothing -> pure []
-          Just cn' -> loop cn'
+        stepFatChainL "expandClusterChainFrom" cn >>= \case
+          Link_UnAllocated -> error "expandClusterChainFrom/UnAllocated"
+          Link_NextCluster cn' -> loop cn'
+          Link_EndOfChain -> pure []
 
 entryAddressesAtSector :: SectorIndex -> [Addr] -- # (512/32 = 16)
 entryAddressesAtSector si = do
@@ -605,9 +627,12 @@ data EntrySlot
   | ES_Short ShortSlot
   | ES_Open
   | ES_OpenEnd
+  deriving Show
 
 data LongSlot = LongSlot { addr :: Addr, nameChunk :: String }
+  deriving Show
 data ShortSlot = ShortSlot { addr :: Addr }
+  deriving Show
 
 longAddr :: LongSlot -> Addr
 longAddr LongSlot{addr} = addr
@@ -618,36 +643,15 @@ shortAddr ShortSlot{addr} = addr
 ----------------------------------------------------------------------
 -- FAT
 
-nextCN :: CN -> M (Maybe CN)
-nextCN cn = do
-  cn' <- stepFatChain cn
-  if
-    | cn' /= 0xffff -> do
-        pure Nothing
-    | otherwise -> do
-        pure (Just cn')
-
-nextCluster :: CN -> M CN
+nextCluster :: CN -> M CN -- allocating if necessary
 nextCluster cn = do
-  cn' <- stepFatChain cn
-  if
-    | cn' /= 0xffff -> do
-        pure cn'
-    | otherwise -> do
-        cn' <- allocteCluster
-        --let cn' = 1 + cn'0
-        setNextCluser cn (fi cn')
-        pure cn'
-
--- This become a big performace drain as the disk fill up.
--- TOOO: support some kind of FAT caching
-stepFatChain ::CN -> M CN
-stepFatChain cn = do
-  (si,so) <- cn2sio cn
-  cn' <- CN <$> get16 si so
-  -- _see("stepFatChain",cn,(si,so),"-->",cn')
-  pure cn'
-
+  stepFatChainL "nextCluster" cn >>= \case
+    Link_UnAllocated -> undefined
+    Link_NextCluster cn' -> pure cn'
+    Link_EndOfChain -> do
+      cn' <- allocteCluster
+      setNextCluser cn (fi cn')
+      pure cn'
 
 getNextCandidateCN :: M CN
 getNextCandidateCN = do
@@ -665,11 +669,10 @@ allocteCluster = getNextCandidateCN >>= loop
   where
     loop :: CN -> M CN
     loop cn = do
-      cn' <- stepFatChain cn
-      if cn' /= 0
-        then loop (cn+1)
-        else
-        do
+      stepFatChainL "allocteCluster" cn >>= \case
+        Link_EndOfChain -> loop (cn+1)
+        Link_NextCluster{} -> loop (cn+1)
+        Link_UnAllocated -> do
           setNextCluser cn 0xffff
           setLastAllocatedCN cn
           pure cn
@@ -694,12 +697,25 @@ zeroBytesInClusterChain cn = loop cn
       si <- siFromClusterNumber cn
       let bytes = replicate 512 0x0
       writeSectorBytes si 0 bytes
-      cn' <- stepFatChain cn
-      if
-        | cn' == 0xffff -> do
-            pure ()
-        | otherwise -> do
-            loop cn'
+      stepFatChainL "zeroBytesInClusterChain" cn >>= \case
+        Link_UnAllocated -> error "zeroBytesInClusterChain/UnAllocated"
+        Link_EndOfChain -> pure ()
+        Link_NextCluster cn' -> loop cn'
+
+data Link = Link_UnAllocated | Link_NextCluster CN | Link_EndOfChain
+
+stepFatChainL :: String -> CN -> M Link
+stepFatChainL _who cn = do
+  --_see("stepFatChain",cn,"-->", _who)
+  assert (cn /= 0) $ do
+  assert (cn /= 0xffff) $ do
+  (si,so) <- cn2sio cn
+  cn' <- CN <$> get16 si so
+  --_see("stepFatChain",cn,"-->",cn', _who)
+  if
+    | cn' == 0 -> pure Link_UnAllocated -- TODO: maybe this case is always an error?
+    | cn' == 0xffff -> pure Link_EndOfChain
+    | otherwise -> pure (Link_NextCluster cn')
 
 -- This is the core computation...
 siFromClusterNumber :: CN -> M SectorIndex
