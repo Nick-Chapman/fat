@@ -27,20 +27,56 @@ import Prelude hiding (interact)
 import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,bytes16,bytes32,bytesString)
 import Volume (bytesPerDirEntry,Vol(..),CN(..))
 
-data Entry = Entry { longName :: String, item :: Item } deriving Show
-data Item = IDir Dir | IFile File deriving Show
-data Dir = Root | Sub { firstCluster :: CN } deriving Show
-data File = File { fileSize :: W32, firstCluster :: CN } deriving Show
+data Entry = Entry { longName :: String, item :: Item } deriving (Eq,Show)
+data Item = IDir Dir | IFile File deriving (Eq,Show)
+data Dir = Root | Sub { firstCluster :: CN } deriving (Eq,Show)
+data File = File { fileSize :: W32, firstCluster :: CN } deriving (Eq,Show)
+
+-- TODO: allow switch without making #loads worse
+data Switch = Old | New
+switch :: Switch
+switch = Old
 
 getDirEntries :: Dir -> M [Entry]
-getDirEntries dir = do
-  --liftIO $ print ("getDirEntries", dir)
-  es <- getDirEntries1 dir
-  --liftIO $ mapM_ print es
-  pure es
+getDirEntries = case switch of Old -> _old_getDirEntries; New -> _new_getDirEntries
 
-getDirEntries1 :: Dir -> M [Entry]
-getDirEntries1 dir = map entryOfDR <$> getDirInfo dir
+_comp_getDirEntries :: Dir -> M [Entry]
+_comp_getDirEntries dir = do
+  --liftIO $ print ("getDirEntries", dir)
+  es1 <- _old_getDirEntries dir
+  es2 <- _new_getDirEntries dir
+  if (es1 == es2) then pure es1 else do
+    liftIO (print ("es1...", length es1))
+    liftIO $ mapM_ print es1
+    liftIO (print ("es2...", length es2))
+    liftIO $ mapM_ print es2
+    undefined
+
+_old_getDirEntries :: Dir -> M [Entry]
+_old_getDirEntries dir = map entryOfDR <$> getDirInfo dir
+
+-- TODO: many more sector loads
+_new_getDirEntries :: Dir -> M [Entry]
+_new_getDirEntries dir = do
+  slots <- dirEntrySlots dir
+  --liftIO $ print "slots..."
+  --liftIO $ mapM_ print slots
+  let groups = groupSlots slots
+  ---liftIO $ print "grouped..."
+  --liftIO $ mapM_ print groups
+  mapM entryOfGroup groups
+
+entryOfGroup :: SlotGroup -> M Entry
+entryOfGroup g@(_,short) = do
+  item <- itemAtShortSlot short
+  shortName <- shortNameAtShortSlot short
+  longName <- if
+    | shortName == ".          " -> pure "."
+    | shortName == "..         " -> pure ".."
+    | otherwise -> longNameOfGroup g
+
+  pure Entry { longName, item }
+
 
 entryOfDR :: DirRecord -> Entry
 entryOfDR DirRecord{longName,isDir,fileSize,firstCluster} =
@@ -471,7 +507,12 @@ getDirRecord acc si so = do
         | shortName == "..         " -> ".."
         | otherwise -> acc
   let isDir = (attr .&. 0x10) /= 0
-  pure DirRecord { kind,attr,firstCluster,fileSize,shortName,longName,isDir }
+  pure DirRecord { kind
+                 -- ,attr
+                 ,firstCluster,fileSize
+                 --,shortName
+                 ,longName,isDir
+                 }
 
 getFileContents :: File -> M String
 getFileContents dr = do
@@ -497,10 +538,10 @@ getFileContents dr = do
 
 data DirRecord = DirRecord
   { kind :: DirRecordKind
-  , attr :: W8
+--  , attr :: W8
   , firstCluster :: CN
   , fileSize :: W32
-  , shortName :: String
+--  , shortName :: String
   , longName :: String
   , isDir :: Bool
   } deriving Show
@@ -511,13 +552,6 @@ data DirRecordKind = DRK_Normal | DRK_Long | DRK_Unused | DRK_EndOfDir
 
 ----------------------------------------------------------------------
 -- new directory stuff -- TODO: make this subsume all previous dir decodin
-
-{-data Switch = Old | New
-switch :: Switch
-switch = New
-findEntryAddr :: String -> Dir -> M (Maybe Addr)
-findEntryAddr = case switch of Old -> _old_findEntryAddr; New -> _new_findEntryAddr
--}
 
 findEntryAddr :: String -> Dir -> M (Maybe Addr)
 findEntryAddr sought dir =
@@ -542,25 +576,27 @@ findSlotGroup sought dir = do
   --liftIO $ print "grouped..."
   --liftIO $ mapM_ print groups
   let
-    loop :: [SlotGroup] -> Maybe SlotGroup
+    loop :: [SlotGroup] -> M (Maybe SlotGroup)
     loop = \case
-      [] -> Nothing
-      g:gs -> if longNameOfGroup g == sought then Just g else loop gs
-  let res = loop groups
-  pure res
+      [] -> pure Nothing
+      g:gs -> do
+        longName <- longNameOfGroup g
+        if longName == sought then pure (Just g) else loop gs
+  loop groups
 
 type SlotGroup = ([LongSlot],ShortSlot)
 
-longNameOfGroup :: SlotGroup -> String
+longNameOfGroup :: SlotGroup -> M String
 longNameOfGroup (longs,_) =
-  concat [ nameChunk | LongSlot{nameChunk} <- reverse longs ]
+  pure $ concat [ nameChunk | LongSlot{nameChunk} <- reverse longs ]
 
 groupSlots :: [EntrySlot] -> [SlotGroup]
 groupSlots = loop []
   where
     loop :: [LongSlot] -> [EntrySlot] -> [SlotGroup]
     loop longs = \case
-      [] -> undefined -- we always have a end-slot
+      -- We might not have an end slot; this sector might be full
+      [] -> []
       slot:slots -> do
         case slot of
           ES_Long long -> loop (long:longs) slots
@@ -617,7 +653,7 @@ decodeEntrySlot addr@(si,so) = do
     | firstByte == 0x00 -> pure ES_OpenEnd
     | firstByte == 0xE5 -> pure ES_Open
     | (attr .&. 0xF) == 0xF -> do
-        nameChunk <- getLongNameChunk addr
+        nameChunk <- getLongNameChunk addr -- TODO: Maye delay this
         pure (ES_Long (LongSlot {addr,nameChunk}))
     | otherwise -> do
         pure (ES_Short (ShortSlot {addr}))
@@ -645,6 +681,23 @@ longAddr LongSlot{addr} = addr
 
 shortAddr :: ShortSlot -> Addr
 shortAddr ShortSlot{addr} = addr
+
+itemAtShortSlot :: ShortSlot -> M Item
+itemAtShortSlot ShortSlot{addr=(si,so)} = do
+  attr <- get8 si (so+0xB)
+  firstCluster <- CN <$> get16 si (so + 0x1A)
+  let isDir = (attr .&. 0x10) /= 0
+  if | isDir -> do
+         pure $ IDir (if firstCluster == 0 then Root
+                      else Sub { firstCluster })
+     | otherwise -> do
+         fileSize <- get32 si (so + 0x1C)
+         pure $ IFile (File { fileSize, firstCluster })
+
+
+shortNameAtShortSlot :: ShortSlot -> M String
+shortNameAtShortSlot ShortSlot{addr=(si,so)} = do
+  map toChar <$> getBytes si so 11
 
 ----------------------------------------------------------------------
 -- FAT
