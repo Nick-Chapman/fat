@@ -59,16 +59,17 @@ _old_getDirEntries dir = map entryOfDR <$> getDirInfo dir
 _new_getDirEntries :: Dir -> M [Entry]
 _new_getDirEntries dir = do
   slots <- dirEntrySlots dir
---  groups <- groupSlots slots >>= fromLinks
---  mapM entryOfGroup groups
 
-  groups <- groupSlots slots
-  let res = traverseLinks entryOfGroup groups
+  --groups <- groupSlots slots
+  --let res = traverseLinks entryOfGroup groups
+
+  res <- _groupSlotsIntoEntries slots
+
   fromLinks res
 
 
 entryOfGroup :: SlotGroup -> M Entry
-entryOfGroup g@(_,short) = do
+entryOfGroup g@(SlotGroup _ short) = do
   item <- itemAtShortSlot short
   shortName <- shortNameAtShortSlot short
   longName <- if
@@ -565,7 +566,7 @@ findEntryAddresses :: String -> Dir -> M (Maybe ([Addr],Addr))
 findEntryAddresses sought dir = do
   findSlotGroup sought dir >>= \case
     Nothing -> pure Nothing
-    Just (longs,short) -> do
+    Just (SlotGroup longs short) -> do
       pure $ Just (map longAddr longs, shortAddr short)
 
 findSlotGroup :: String -> Dir -> M (Maybe SlotGroup)
@@ -581,10 +582,10 @@ findSlotGroup sought dir = do
         if longName == sought then pure (Just g) else loop gs
   loop groups
 
-type SlotGroup = ([LongSlot],ShortSlot)
+data SlotGroup = SlotGroup [LongSlot] ShortSlot
 
 longNameOfGroup :: SlotGroup -> M String
-longNameOfGroup (longs,_) =
+longNameOfGroup (SlotGroup longs _) =
   pure $ concat [ nameChunk | LongSlot{nameChunk} <- reverse longs ]
 
 
@@ -612,6 +613,27 @@ groupSlots1 = loop []
             assert (case longs of [] -> True; _ -> False) $ do
             []
 -}
+
+_groupSlotsIntoEntries :: Links EntrySlot -> M (Links Entry)
+_groupSlotsIntoEntries = loop []
+  where
+    loop :: [LongSlot] -> Links EntrySlot -> M (Links Entry)
+    loop longs (Links opt) = case opt of
+      Nothing -> pure nilLinks
+      Just mp -> do
+        (slot,slots) <- mp
+        case slot of
+          ES_Long long -> loop (long:longs) slots
+          ES_Short short -> do
+            let group = SlotGroup (reverse longs) short
+            entry <- entryOfGroup group
+            consLink entry <$> loop [] slots
+          ES_Open -> loop longs slots
+          ES_OpenEnd -> do
+            assert (case longs of [] -> True; _ -> False) $ do
+            pure nilLinks
+
+
 groupSlots :: Links EntrySlot -> M (Links SlotGroup)
 groupSlots = loop []
   where
@@ -622,11 +644,15 @@ groupSlots = loop []
         (slot,slots) <- mp
         case slot of
           ES_Long long -> loop (long:longs) slots
-          ES_Short short -> consLink (reverse longs, short) <$> loop [] slots
+          ES_Short short -> do
+            let group = SlotGroup (reverse longs) short
+            consLink group <$> loop [] slots
+
           ES_Open -> loop longs slots
           ES_OpenEnd -> do
             assert (case longs of [] -> True; _ -> False) $ do
             pure nilLinks
+
 
 dirEntrySlots :: Dir -> M (Links EntrySlot)
 dirEntrySlots dir =
@@ -683,8 +709,10 @@ decodeEntrySlot addr@(si,so) = do
         nameChunk <- getLongNameChunk addr -- TODO: Maye delay this
         pure (ES_Long (LongSlot {addr,nameChunk}))
     | otherwise -> do
-        name <- map toChar <$> getBytes si so 11
-        item <- itemAtAddr addr
+        --name <- map toChar <$> getBytes si so 11
+        let name = undefined
+        --item <- _itemAtAddr addr
+        let item = undefined
         pure (ES_Short (ShortSlot {addr,name,item}))
 
 -- grabbed this from earlier coding
@@ -712,11 +740,11 @@ shortAddr :: ShortSlot -> Addr
 shortAddr ShortSlot{addr} = addr
 
 itemAtShortSlot :: ShortSlot -> M Item
---itemAtShortSlot ShortSlot{addr} = itemAtAddr addr
-itemAtShortSlot ShortSlot{item} = pure item
+itemAtShortSlot ShortSlot{addr} = _itemAtAddr addr
+--itemAtShortSlot ShortSlot{item} = pure item
 
-itemAtAddr :: Addr -> M Item
-itemAtAddr (si,so) = do
+_itemAtAddr :: Addr -> M Item
+_itemAtAddr (si,so) = do
   attr <- get8 si (so+0xB)
   firstCluster <- CN <$> get16 si (so + 0x1A)
   let isDir = (attr .&. 0x10) /= 0
@@ -729,8 +757,8 @@ itemAtAddr (si,so) = do
 
 
 shortNameAtShortSlot :: ShortSlot -> M String
---shortNameAtShortSlot ShortSlot{addr=(si,so)} = map toChar <$> getBytes si so 11
-shortNameAtShortSlot ShortSlot{name} = pure name
+shortNameAtShortSlot ShortSlot{addr=(si,so)} = map toChar <$> getBytes si so 11
+--shortNameAtShortSlot ShortSlot{name} = pure name
 
 ----------------------------------------------------------------------
 -- FAT
@@ -868,3 +896,14 @@ traverseLinks f (Links opt) = case opt of
     (x,xs) <- mp
     y <- f x
     pure (y, traverseLinks f xs)
+
+{-
+_traverseLinksM :: (a -> M b) -> Links a -> M (Links b)
+_traverseLinksM f (Links opt) = pure $ case opt of
+  Nothing -> Links Nothing
+  Just mp -> Links $ Just do
+    (x,xs) <- mp
+    y <- f x
+    ys <- _traverseLinksM f xs
+    pure (y, ys)
+-}
