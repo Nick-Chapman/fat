@@ -32,23 +32,13 @@ data Item = IDir Dir | IFile File deriving (Eq,Show)
 data Dir = Root | Sub { firstCluster :: CN } deriving (Eq,Show)
 data File = File { fileSize :: W32, firstCluster :: CN } deriving (Eq,Show)
 
--- TODO: understand why fused groupSlots+entryOfGroup is an improvement
--- Yes. See fix in groupSlots
-data Switch = Old | New
-switch :: Switch
-switch = Old
 
 getDirEntries :: Dir -> M [Entry]
 getDirEntries dir = do
   slots <- dirEntrySlots dir
-  case switch of
-    Old -> do
-      groups <- groupSlots slots
-      res <- traverseLinks entryOfGroup groups
-      fromLinks res
-    New -> do
-      res <- groupSlotsIntoEntries slots
-      fromLinks res
+  groups <- groupSlots slots
+  res <- traverseLinks entryOfGroup groups
+  fromLinks res
 
 entryOfGroup :: SlotGroup -> M Entry
 entryOfGroup g@(SlotGroup _ short) = do
@@ -444,29 +434,6 @@ longNameOfGroup :: SlotGroup -> M String
 longNameOfGroup (SlotGroup longs _) =
   pure $ concat [ nameChunk | LongSlot{nameChunk} <- reverse longs ]
 
-groupSlotsIntoEntries :: Links EntrySlot -> M (Links Entry)
-groupSlotsIntoEntries = loop []
-  where
-    loop :: [LongSlot] -> Links EntrySlot -> M (Links Entry)
-    loop longs = \case
-      Nil -> pure Nil
-      Cons slot slotsm -> do
-        case slot of
-          ES_Long long -> do
-            slots <- slotsm -- ???
-            loop (long:longs) slots
-          ES_Short short -> do
-            let group = SlotGroup (reverse longs) short
-            entry <- entryOfGroup group
-            slots <- slotsm -- ???
-            pure $ Cons entry (loop [] slots) -- ???
-          ES_Open -> do
-            slots <- slotsm -- ???
-            loop longs slots
-          ES_OpenEnd -> do
-            assert (case longs of [] -> True; _ -> False) $ do
-            pure Nil
-
 groupSlots :: Links EntrySlot -> M (Links SlotGroup)
 groupSlots = loop []
   where
@@ -476,15 +443,15 @@ groupSlots = loop []
       Cons slot slotsm -> do
         case slot of
           ES_Long long -> do
-            slots <- slotsm -- ???
+            slots <- slotsm
             loop (long:longs) slots
           ES_Short short -> do
             let group = SlotGroup (reverse longs) short
             pure $ Cons group $ do
               slots <- slotsm -- Moving this here is the fix!
-              loop [] slots -- ???
+              loop [] slots
           ES_Open -> do
-            slots <- slotsm -- ???
+            slots <- slotsm
             loop longs slots
           ES_OpenEnd -> do
             assert (case longs of [] -> True; _ -> False) $ do
@@ -503,7 +470,7 @@ dirEntryAdresses dir = dirSectors dir >>= loop
       Nil -> pure Nil
       Cons si morem -> do
         prefixLinks (entryAddressesAtSector si) $ do
-          more <- morem -- ???
+          more <- morem
           loop more
 
 dirSectors :: Dir -> M (Links SectorIndex)
@@ -529,7 +496,7 @@ expandClusterChainFrom = loop
           pure $ Cons si (pure Nil)
         Link_NextCluster cn' -> do
           pure $ Cons si $ do
-            more <- loop cn' -- ???
+            more <- loop cn'
             pure more
 
 entryAddressesAtSector :: SectorIndex -> [Addr] -- # (512/32 = 16)
