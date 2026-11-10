@@ -1,6 +1,13 @@
 /birth : ""
 /first : "contents\n"
 /abc-defghijklmnopqrstuvwxyz : "q\n"
+/j : "\n"
+/a1234567 : "\n"
+/b12345678 : "\n"
+/c123456789 : "\n"
+/1.a : "\n"
+/1.abc : "\n"
+/1.abcd : "\n"
 /zero : ""
 /single : "x"
 /numbers.txt : "0123456789\n"
@@ -29,4 +36,4 @@
 /d : "x\n"
 /e : "x\n"
 /empty : ""
-[#loads=37, #saves=0]
+[#loads=45, #saves=0]

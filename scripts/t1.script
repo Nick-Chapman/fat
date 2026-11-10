@@ -4,7 +4,7 @@ echo contents > first
 
 echo q > abc-defghijklmnopqrstuvwxyz
 
-echo '' > a
+echo '' > j
 echo '' > a1234567
 echo '' > b12345678
 echo '' > c123456789
