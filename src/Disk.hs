@@ -58,11 +58,10 @@ data M a where
 data Tracking = Tracking
   { loads :: Map SectorIndex Int
   , saves :: Map SectorIndex Int
-  , countSlots :: Int
   }
 
 initTracking :: Tracking
-initTracking = Tracking { loads = Map.empty, saves = Map.empty, countSlots = 0 }
+initTracking = Tracking { loads = Map.empty, saves = Map.empty }
 
 exec :: FilePath -> M a -> IO a
 exec path m0 = do
@@ -74,8 +73,7 @@ exec path m0 = do
       LiftIO io -> do a <- io; pure (a,tracking)
       NewSector -> do
         sec <- Sector <$> newIOArray (0,fromIntegral sectorSize-1) 0
-        let Tracking{countSlots} = tracking
-        pure (sec,tracking { countSlots = 1 + countSlots })
+        pure (sec,tracking)
       LoadIntoSector si sec -> do
         --print ("LoadSectorInto",si)
         let Tracking{loads} = tracking
@@ -89,10 +87,10 @@ exec path m0 = do
         saveSectorIO path si sec
         pure ((),tracking')
 
-  (a,Tracking{loads,saves,countSlots}) <- go initTracking m0
+  (a,Tracking{loads,saves}) <- go initTracking m0
   let numLoads = sum (Map.elems loads)
   let numSaves = sum (Map.elems saves)
-  printf "[#loads=%d, #saves=%d, #slots=%d]\n" numLoads numSaves countSlots
+  printf "[#loads=%d, #saves=%d]\n" numLoads numSaves
   when False $ do
     print ("loads",[ (fromIntegral si :: W16,n) | (si,n) <- Map.toList loads, n > 1 ])
     print ("saves",[ (fromIntegral si :: W16,n) | (si,n) <- Map.toList saves, n > 1 ])
