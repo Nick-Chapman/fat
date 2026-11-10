@@ -85,8 +85,10 @@ parseCom s =
     ["ls"] -> Command Ls
     ["cd",name] -> Command (Cd name)
     ["cat",name] -> Command (Cat name)
-    ["echo","''",">",name] -> Command (EchoRedirect "" name)
-    ["echo",s,">",name] -> Command (EchoRedirect s name)
+    ["echo","-n","''",">",name] -> Command (Touch name)
+    ["echo","-n",s,">",name] -> Command (EchoRedirect s name)
+    ["echo","''",">",name] -> Command (EchoRedirect "\n" name)
+    ["echo",s,">",name] -> Command (EchoRedirect (s++"\n") name)
     ["touch",name] -> Command (Touch name)
     ["cp",path@('/':_),name] -> Command (CopyIn path name)
     ["mkdir",name] -> Command (Mkdir name)
@@ -128,7 +130,7 @@ execCom dt state@State{cwd} = \case
       Just (IDir dir) -> do
         pure state { cwd = dir }
   EchoRedirect contents name -> do
-    let makeFile = echoRedirect dt (contents++"\n") name cwd
+    let makeFile = echoRedirect dt contents name cwd
     lookupItem cwd name >>= \case
       Just IDir{} -> do
         errM (printf "%s: is a directory" name)

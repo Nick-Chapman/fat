@@ -1,0 +1,60 @@
+touch birth
+
+echo contents > first
+
+echo q > abc-defghijklmnopqrstuvwxyz
+
+echo '' > a
+echo '' > a1234567
+echo '' > b12345678
+echo '' > c123456789
+echo '' > 1.a
+echo '' > 1.abc
+echo '' > 1.abcd
+
+echo -n '' > zero
+echo -n x > single
+
+echo 0123456789 > numbers.txt
+echo abcdefghijklmnopqrstuvwxyz > letters
+
+echo -n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa > a
+
+echo x > b
+echo x > c
+
+mkdir sub
+cd sub
+echo subfile > thing
+mkdir sub2
+cd sub2
+echo sub2file > deep
+cd ..
+cd ..
+
+echo x > d
+echo x > e
+
+touch empty
+cd sub
+
+echo a > thing2
+echo b > thing3
+echo c > thing4
+echo d > thing5
+echo e > thing6
+echo f > thing7
+echo g > thing8
+echo h > thing9
+echo i > thing10
+echo j > thing11
+echo k > thing12
+echo l > thing13
+echo m > thing14
+echo n > thing15
+echo o > thing16
+echo p > thing17
+cd ..
+
+# TODO: suppoer file append
+# echo AAAAAAAAAAAAAAAAAAA-LAST >> a
