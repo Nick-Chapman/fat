@@ -33,9 +33,10 @@ data Dir = Root | Sub { firstCluster :: CN } deriving (Eq,Show)
 data File = File { fileSize :: W32, firstCluster :: CN } deriving (Eq,Show)
 
 -- TODO: understand why fused groupSlots+entryOfGroup is an improvement
+-- Yes. See fix in groupSlots
 data Switch = Old | New
 switch :: Switch
-switch = New
+switch = Old
 
 getDirEntries :: Dir -> M [Entry]
 getDirEntries dir = do
@@ -479,8 +480,9 @@ groupSlots = loop []
             loop (long:longs) slots
           ES_Short short -> do
             let group = SlotGroup (reverse longs) short
-            slots <- slotsm -- ???
-            pure $ Cons group (loop [] slots) -- ???
+            pure $ Cons group $ do
+              slots <- slotsm -- Moving this here is the fix!
+              loop [] slots -- ???
           ES_Open -> do
             slots <- slotsm -- ???
             loop longs slots
