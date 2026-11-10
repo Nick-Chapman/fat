@@ -516,11 +516,7 @@ decodeEntrySlot addr@(si,so) = do
         nameChunk <- getLongNameChunk addr -- TODO: Maybe delay this
         pure (ES_Long (LongSlot {addr,nameChunk}))
     | otherwise -> do
-        --name <- map toChar <$> getBytes si so 11
-        let name = undefined
-        --item <- _itemAtAddr addr
-        let item = undefined
-        pure (ES_Short (ShortSlot {addr,name,item}))
+        pure (ES_Short (ShortSlot {addr}))
 
 -- grabbed this from earlier coding
 getLongNameChunk :: Addr -> M String
@@ -542,8 +538,6 @@ data LongSlot = LongSlot
   deriving Show
 data ShortSlot = ShortSlot
   { addr :: Addr
-  , name :: String -- TODO: remove?
-  , item :: Item -- TODO: remove?
   }
   deriving Show
 
