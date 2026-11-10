@@ -13,10 +13,6 @@ include ~/code/jenga/rulelib/expect.jenga
 empty.image: create-empty-fat.sh
   ./$in1 $out >/dev/null
 
-# big: use for interacting with
-big.image: run-script-on-image.sh empty.image big.script
-  ./$in1 $in2 big.script $out /dev/null
-
 # small: used for test1 (read-ops)
 small.image: run-script-on-image.sh empty.image small.script
   ./$in1 $in2 small.script $out /dev/null
@@ -25,7 +21,6 @@ test1.out : src/fat.exe small.image
   cp $in2 $in2.writable
   chmod +w $in2.writable
   ./$in1 $in2.writable > $out
-
 
 rules : mk.rules script.names
   ./$in1 $$(cat script.names) > $out
