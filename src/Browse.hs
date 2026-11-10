@@ -3,7 +3,7 @@ module Browse (dump,interact) where
 import CachedDisk (M,exec)
 import Control.Monad.IO.Class (liftIO)
 import DateTime (Date,Time)
-import Fat16 (Entry(..),Item(..),File(..),Dir(..),getDirEntries,getFileContents,echoRedirect,mkDir,touch,removeDirEntry)
+import Fat16 (Entry(..),Item(..),File(..),Dir(..),getDirEntries,getFileContents,echoRedirect,appendRedirect,mkDir,touch,removeDirEntry)
 import FileTree (Tree(..),TreeEntry(..),printTree)
 import Prelude hiding (interact)
 import System.Console.ANSI qualified as AN
@@ -68,6 +68,7 @@ data Com
   | Cat Name
   | Cd Name
   | EchoRedirect String Name
+  | AppendRedirect String Name
   | Touch Name
   | CopyIn FilePath Name
   | Mkdir Name
@@ -89,6 +90,7 @@ parseCom s =
     ["echo","-n",s,">",name] -> Command (EchoRedirect s name)
     ["echo","''",">",name] -> Command (EchoRedirect "\n" name)
     ["echo",s,">",name] -> Command (EchoRedirect (s++"\n") name)
+    ["echo",s,">>",name] -> Command (AppendRedirect (s++"\n") name)
     ["touch",name] -> Command (Touch name)
     ["cp",path@('/':_),name] -> Command (CopyIn path name)
     ["mkdir",name] -> Command (Mkdir name)
@@ -138,6 +140,16 @@ execCom dt state@State{cwd} = \case
         removeDirEntry True name cwd
         makeFile
       Nothing -> makeFile
+    pure state
+  AppendRedirect contents name -> do
+    let appendFile = appendRedirect dt contents name cwd
+    lookupItem cwd name >>= \case
+      Just IDir{} -> do
+        errM (printf "%s: is a directory" name)
+      Just IFile{} -> do
+        appendFile
+      Nothing ->
+        appendFile
     pure state
   Touch name -> do
     touch dt name cwd

@@ -7,6 +7,7 @@ module Fat16
   , getDirEntries
   , getFileContents
   , echoRedirect
+  , appendRedirect
   , mkDir
   , touch
   , removeDirEntry
@@ -65,6 +66,19 @@ echoRedirect dt contents longName dir = do
   cn <- allocteCluster
   setStartingCluster longName cn dir
   writeBytesInClusterChain cn (bytesString contents)
+
+appendRedirect :: (Date,Time) -> String -> String -> Dir -> M ()
+appendRedirect dt extraContents longName dir = do
+  findEntryAddresses longName dir >>= \case
+    Nothing -> echoRedirect dt extraContents longName dir
+    Just (_longAs,addr) -> do
+      cn <- startingClusterFromAddr addr
+      fileSize <- fileSizeAtAddr addr
+      setFileSizeAtAddr addr (fileSize + fromIntegral (length extraContents))
+      -- TODO: avoid read and re-write of existing contents
+      oldContentts <- getFileContents File { fileSize, firstCluster = cn }
+      let contents = oldContentts ++ extraContents
+      writeBytesInClusterChain cn (bytesString contents)
 
 mkDir :: (Date,Time) -> String -> Dir -> M ()
 mkDir dt longName dir = do
@@ -552,7 +566,7 @@ itemAtShortSlot ShortSlot{addr} = itemAtAddr addr
 --itemAtShortSlot ShortSlot{item} = pure item
 
 itemAtAddr :: Addr -> M Item
-itemAtAddr (si,so) = do
+itemAtAddr addr@(si,so) = do
   attr <- get8 si (so+0xB)
   firstCluster <- CN <$> get16 si (so + 0x1A)
   let isDir = (attr .&. 0x10) /= 0
@@ -560,9 +574,14 @@ itemAtAddr (si,so) = do
          pure $ IDir (if firstCluster == 0 then Root
                       else Sub { firstCluster })
      | otherwise -> do
-         fileSize <- get32 si (so + 0x1C)
+         fileSize <- fileSizeAtAddr addr
          pure $ IFile (File { fileSize, firstCluster })
 
+fileSizeAtAddr :: Addr -> M W32
+fileSizeAtAddr (si,so) = get32 si (so + 0x1C)
+
+setFileSizeAtAddr :: Addr -> W32 -> M ()
+setFileSizeAtAddr (si,so) w = set32 si (so + 0x1C) w
 
 shortNameAtShortSlot :: ShortSlot -> M String
 shortNameAtShortSlot ShortSlot{addr=(si,so)} = map toChar <$> getBytes si so 11
@@ -632,7 +651,7 @@ zeroBytesInClusterChain cn = loop cn
 
 data Link = Link_UnAllocated | Link_NextCluster CN | Link_EndOfChain
 
-stepFatChainL :: String -> CN -> M Link
+stepFatChainL :: String -> CN -> M Link -- TODO: loose who
 stepFatChainL _who cn = do
   --_see("stepFatChain",cn,"-->", _who)
   assert (cn /= 0) $ do

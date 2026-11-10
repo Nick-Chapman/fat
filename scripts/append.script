@@ -1,0 +1,7 @@
+touch birth
+
+echo xxx > file1
+echo yyy > file2
+
+echo 111 >> file1
+echo 222 >> file2

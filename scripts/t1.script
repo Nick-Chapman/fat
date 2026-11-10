@@ -56,5 +56,4 @@ echo o > thing16
 echo p > thing17
 cd ..
 
-# TODO: suppoer file append
-# echo AAAAAAAAAAAAAAAAAAA-LAST >> a
+echo AAAAAAAAAAAAAAAAAAA-LAST >> a
