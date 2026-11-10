@@ -1,11 +1,11 @@
 touch birth
 
+mkdir sub
+cd sub
+
 echo x > first
 echo x > first.txt
 echo x > a.b.c
-
-mkdir sub
-cd sub
 
 echo y > f2
 

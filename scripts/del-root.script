@@ -1,0 +1,19 @@
+touch birth
+
+echo 111 > xxx
+echo 222 > yyy
+cp /home/nic/code/minimal/README.md minimal
+echo 333 > zzz
+rm minimal
+
+echo 444 > abcdefghijk234
+echo 555 > short
+
+# overwrite
+echo 666 > short
+
+echo 777 > zzz
+
+mkdir folder
+
+rmdir folder
