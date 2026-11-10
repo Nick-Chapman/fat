@@ -7,4 +7,4 @@ copy=/tmp/interact-$$.image
 
 jenga install $primary $copy
 
-./run-script-on-image.sh $copy script-ls /dev/null /dev/null
+./run-script-on-image.sh $copy ls.script /dev/null /dev/null
