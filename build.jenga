@@ -20,11 +20,13 @@ test1.out : src/fat.exe small.image
   chmod +w $in2.writable
   ./$in1 $in2.writable > $out
 
-names :
-  echo xy >> $out
-  echo del >> $out
 
-rules : mk.rules names
-  ./$in1 $$(cat names) > $out
+script.files : : echo '$glob:scripts' >> $out
+
+script.names : script.files
+  sed 's|\(.*\).script|\1|' < $in > $out
+
+rules : mk.rules script.names
+  ./$in1 $$(cat script.names) > $out
 
 include rules
