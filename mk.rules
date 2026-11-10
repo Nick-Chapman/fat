@@ -3,23 +3,23 @@
 for X in "$@"; do
 cat <<EOF
 
-$X.image $X.birth: run-script-on-image.sh empty.image scripts/$X.script
-  ./run-script-on-image.sh empty.image $X.script $X.image $X.birth
+$X.image-reference $X.birth: run-script-on-image.sh empty.image scripts/$X.script
+  ./run-script-on-image.sh empty.image $X.script $X.image-reference $X.birth
 
-h-$X.image : src/fat.exe empty.image scripts/$X.script $X.birth
+$X.out $X.image : src/fat.exe empty.image scripts/$X.script $X.birth
   cp empty.image empty.image.writable
   chmod +w empty.image.writable
-  cat $X.script | ./fat.exe empty.image.writable -b \$\$(cat $X.birth) #>/dev/null
-  cp empty.image.writable h-$X.image
+  cat $X.script | ./fat.exe empty.image.writable -b \$\$(cat $X.birth) > $X.out
+  cp empty.image.writable $X.image
+
+$X.image-reference.hd : $X.image-reference
+  hd -v $X.image-reference | head -20000 > $X.image-reference.hd
 
 $X.image.hd : $X.image
   hd -v $X.image | head -20000 > $X.image.hd
 
-h-$X.image.hd : h-$X.image
-  hd -v h-$X.image | head -20000 > h-$X.image.hd
-
-*test-$X.diff : $X.image.hd h-$X.image.hd
-  diff $X.image.hd h-$X.image.hd
+*test-$X.diff : $X.image-reference.hd $X.image.hd
+  diff $X.image-reference.hd $X.image.hd
 
 EOF
 done

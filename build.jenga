@@ -1,6 +1,12 @@
 
-expect.names :
+script.files : : echo '$glob:scripts' >> $out
+
+script.names : script.files
+  cat $in | grep 'script$$' | sed 's|\(.*\).script|\1|' > $out
+
+expect.names : script.names
   echo test1.out >> $out
+  cat $in1 | sed 's|.*|&.out|' >> $out
 
 include ~/code/jenga/rulelib/expect.jenga
 
@@ -20,11 +26,6 @@ test1.out : src/fat.exe small.image
   chmod +w $in2.writable
   ./$in1 $in2.writable > $out
 
-
-script.files : : echo '$glob:scripts' >> $out
-
-script.names : script.files
-  cat $in | grep 'script$$' | sed 's|\(.*\).script|\1|' > $out
 
 rules : mk.rules script.names
   ./$in1 $$(cat script.names) > $out
