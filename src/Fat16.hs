@@ -32,14 +32,11 @@ data Item = IDir Dir | IFile File deriving (Eq,Show)
 data Dir = Root | Sub { firstCluster :: CN } deriving (Eq,Show)
 data File = File { fileSize :: W32, firstCluster :: CN } deriving (Eq,Show)
 
--- TODO: allow switch without making #loads worse
-data Switch = Old | New
-switch :: Switch
-switch = New
-
 getDirEntries :: Dir -> M [Entry]
-getDirEntries = case switch of Old -> _old_getDirEntries; New -> _new_getDirEntries
+--getDirEntries = case switch of Old -> _old_getDirEntries; New -> _new_getDirEntries
+getDirEntries = new_getDirEntries
 
+{-
 _comp_getDirEntries :: Dir -> M [Entry]
 _comp_getDirEntries dir = do
   --liftIO $ print ("getDirEntries", dir)
@@ -54,19 +51,25 @@ _comp_getDirEntries dir = do
 
 _old_getDirEntries :: Dir -> M [Entry]
 _old_getDirEntries dir = map entryOfDR <$> getDirInfo dir
+-}
 
--- TODO: many more sector loads
-_new_getDirEntries :: Dir -> M [Entry]
-_new_getDirEntries dir = do
+
+-- TODO: understand why fused groupSlots+entryOfGroup is an improvement
+data Switch = Old | New
+switch :: Switch
+switch = New
+
+new_getDirEntries :: Dir -> M [Entry]
+new_getDirEntries dir = do
   slots <- dirEntrySlots dir
-
-  --groups <- groupSlots slots
-  --let res = traverseLinks entryOfGroup groups
-
-  res <- _groupSlotsIntoEntries slots
-
-  fromLinks res
-
+  case switch of
+    Old -> do
+      groups <- groupSlots slots
+      res <- traverseLinks entryOfGroup groups
+      fromLinks res
+    New -> do
+      res <- groupSlotsIntoEntries slots
+      fromLinks res
 
 entryOfGroup :: SlotGroup -> M Entry
 entryOfGroup g@(SlotGroup _ short) = do
@@ -79,7 +82,7 @@ entryOfGroup g@(SlotGroup _ short) = do
 
   pure Entry { longName, item }
 
-
+{-
 entryOfDR :: DirRecord -> Entry
 entryOfDR DirRecord{longName,isDir,fileSize,firstCluster} =
   Entry { longName
@@ -87,6 +90,7 @@ entryOfDR DirRecord{longName,isDir,fileSize,firstCluster} =
           if isDir then IDir (if firstCluster == 0 then Root else Sub {firstCluster})
           else IFile (File{fileSize,firstCluster})
         }
+-}
 
 touch :: (Date,Time) -> String -> Dir -> M ()
 touch dt longName dir = do
@@ -431,12 +435,13 @@ encodeStandardEntry e = do
 trunOrPadSpace :: Int -> String -> String
 trunOrPadSpace n s = take n (s ++ repeat ' ')
 
-_see :: Show a => a -> M ()
-_see = liftIO .print -- TODO: kill comments out debug all over
+--_see :: Show a => a -> M ()
+--_see = liftIO .print -- TODO: kill comments out debug all over
 
 fi :: (Integral a, Num b) => a -> b
 fi x = fromIntegral x
 
+{-
 getDirInfo :: Dir -> M [DirRecord]
 getDirInfo = \case
   Root -> getRootDirInfo
@@ -490,6 +495,7 @@ getSubDirInfo cn = loop "" cn 0
             DRK_Normal -> do
               drs <- loop "" cn (i+1)
               pure (dr:drs)
+-}
 
 getDirRecord :: String -> SectorIndex -> SectorOffset -> M DirRecord
 getDirRecord acc si so = do
@@ -614,64 +620,71 @@ groupSlots1 = loop []
             []
 -}
 
-_groupSlotsIntoEntries :: Links EntrySlot -> M (Links Entry)
-_groupSlotsIntoEntries = loop []
+groupSlotsIntoEntries :: Links EntrySlot -> M (Links Entry)
+groupSlotsIntoEntries = loop []
   where
     loop :: [LongSlot] -> Links EntrySlot -> M (Links Entry)
-    loop longs (Links opt) = case opt of
-      Nothing -> pure nilLinks
-      Just mp -> do
-        (slot,slots) <- mp
+    loop longs = \case
+      Nil -> pure Nil
+      Cons slot slotsm -> do
         case slot of
-          ES_Long long -> loop (long:longs) slots
+          ES_Long long -> do
+            slots <- slotsm -- ???
+            loop (long:longs) slots
           ES_Short short -> do
             let group = SlotGroup (reverse longs) short
             entry <- entryOfGroup group
-            consLink entry <$> loop [] slots
-          ES_Open -> loop longs slots
+            slots <- slotsm -- ???
+            pure $ Cons entry (loop [] slots) -- ???
+          ES_Open -> do
+            slots <- slotsm -- ???
+            loop longs slots
           ES_OpenEnd -> do
             assert (case longs of [] -> True; _ -> False) $ do
-            pure nilLinks
-
+            pure Nil
 
 groupSlots :: Links EntrySlot -> M (Links SlotGroup)
 groupSlots = loop []
   where
     loop :: [LongSlot] -> Links EntrySlot -> M (Links SlotGroup)
-    loop longs (Links opt) = case opt of
-      Nothing -> pure nilLinks
-      Just mp -> do
-        (slot,slots) <- mp
+    loop longs = \case
+      Nil -> pure Nil
+      Cons slot slotsm -> do
         case slot of
-          ES_Long long -> loop (long:longs) slots
+          ES_Long long -> do
+            slots <- slotsm -- ???
+            loop (long:longs) slots
           ES_Short short -> do
             let group = SlotGroup (reverse longs) short
-            consLink group <$> loop [] slots
-
-          ES_Open -> loop longs slots
+            slots <- slotsm -- ???
+            pure $ Cons group (loop [] slots) -- ???
+          ES_Open -> do
+            slots <- slotsm -- ???
+            loop longs slots
           ES_OpenEnd -> do
             assert (case longs of [] -> True; _ -> False) $ do
-            pure nilLinks
-
+            pure Nil
 
 dirEntrySlots :: Dir -> M (Links EntrySlot)
-dirEntrySlots dir =
-  traverseLinks decodeEntrySlot <$> dirEntryAdresses dir
+dirEntrySlots dir = do
+  addrs <- dirEntryAdresses dir
+  traverseLinks decodeEntrySlot addrs
 
 dirEntryAdresses :: Dir -> M (Links Addr)
 dirEntryAdresses dir = dirSectors dir >>= loop
   where
     loop :: Links SectorIndex -> M (Links Addr)
-    loop (Links opt) = case opt of
-      Nothing -> pure nilLinks
-      Just mp -> do
-        (si,more) <- mp
-        prefixLinks (entryAddressesAtSector si) <$> loop more
+    loop = \case
+      Nil -> pure Nil
+      Cons si morem -> do
+        prefixLinks (entryAddressesAtSector si) $ do
+          more <- morem -- ???
+          loop more
 
 dirSectors :: Dir -> M (Links SectorIndex)
 dirSectors = \case
   Root -> rootSectors
-  Sub cn -> pure (expandClusterChainFrom cn)
+  Sub cn -> expandClusterChainFrom cn
 
 rootSectors :: M (Links SectorIndex)
 rootSectors = do
@@ -679,18 +692,20 @@ rootSectors = do
   let n = fromIntegral (clusterBegin - rootDirBegin)
   pure $ toLinks (take n [rootDirBegin .. ])
 
-expandClusterChainFrom :: CN -> Links SectorIndex
+expandClusterChainFrom :: CN -> M (Links SectorIndex)
 expandClusterChainFrom = loop
   where
-    loop :: CN -> Links SectorIndex
-    loop cn = (Links . Just) do
+    loop :: CN -> M (Links SectorIndex)
+    loop cn = do
       si <- siFromClusterNumber cn
       stepFatChainL "expandClusterChainFrom" cn >>= \case
         Link_UnAllocated -> error "expandClusterChainFrom/UnAllocated"
         Link_EndOfChain -> do
-          pure (si,nilLinks)
+          pure $ Cons si (pure Nil)
         Link_NextCluster cn' -> do
-          pure (si,loop cn')
+          pure $ Cons si $ do
+            more <- loop cn' -- ???
+            pure more
 
 entryAddressesAtSector :: SectorIndex -> [Addr] -- # (512/32 = 16)
 entryAddressesAtSector si = do
@@ -706,7 +721,7 @@ decodeEntrySlot addr@(si,so) = do
     | firstByte == 0x00 -> pure ES_OpenEnd
     | firstByte == 0xE5 -> pure ES_Open
     | (attr .&. 0xF) == 0xF -> do
-        nameChunk <- getLongNameChunk addr -- TODO: Maye delay this
+        nameChunk <- getLongNameChunk addr -- TODO: Maybe delay this
         pure (ES_Long (LongSlot {addr,nameChunk}))
     | otherwise -> do
         --name <- map toChar <$> getBytes si so 11
@@ -728,9 +743,16 @@ data EntrySlot
   | ES_OpenEnd
   deriving Show
 
-data LongSlot = LongSlot { addr :: Addr, nameChunk :: String }
+data LongSlot = LongSlot
+  { addr :: Addr
+  , nameChunk :: String
+  }
   deriving Show
-data ShortSlot = ShortSlot { addr :: Addr, name :: String, item :: Item }
+data ShortSlot = ShortSlot
+  { addr :: Addr
+  , name :: String -- TODO: remove?
+  , item :: Item -- TODO: remove?
+  }
   deriving Show
 
 longAddr :: LongSlot -> Addr
@@ -740,11 +762,11 @@ shortAddr :: ShortSlot -> Addr
 shortAddr ShortSlot{addr} = addr
 
 itemAtShortSlot :: ShortSlot -> M Item
-itemAtShortSlot ShortSlot{addr} = _itemAtAddr addr
+itemAtShortSlot ShortSlot{addr} = itemAtAddr addr
 --itemAtShortSlot ShortSlot{item} = pure item
 
-_itemAtAddr :: Addr -> M Item
-_itemAtAddr (si,so) = do
+itemAtAddr :: Addr -> M Item
+itemAtAddr (si,so) = do
   attr <- get8 si (so+0xB)
   firstCluster <- CN <$> get16 si (so + 0x1A)
   let isDir = (attr .&. 0x10) /= 0
@@ -866,44 +888,30 @@ cn2sio cn = do
 ----------------------------------------------------------------------
 -- Links: monad aware list
 
-prefixLinks :: [a] -> Links a -> Links a
-prefixLinks xs l = foldr consLink l xs
+data Links a = Nil | Cons a (M (Links a))
 
-nilLinks :: Links a
-nilLinks = Links Nothing
-
-consLink :: a -> Links a -> Links a
-consLink a links = Links (Just (pure (a,links)))
-
-data Links a = Links (Maybe (M (a,Links a)))
+prefixLinks :: [a] -> M (Links a) -> M (Links a)
+prefixLinks xs l = foldr (\x xs -> pure (Cons x xs)) l xs
 
 toLinks :: [a] -> Links a
-toLinks = Links . \case
-  [] -> Nothing
-  x:xs -> Just (pure (x, toLinks xs))
+toLinks = \case
+  [] -> Nil
+  x:xs -> Cons x (pure (toLinks xs))
 
 fromLinks :: Links a -> M [a]
-fromLinks (Links opt) = case opt of
-  Nothing -> pure []
-  Just mp -> do
-    (x,links) <- mp
-    (x:) <$> fromLinks links
+fromLinks = \case
+  Nil -> pure []
+  Cons x xsm -> do
+    xs <- xsm
+    list <- fromLinks xs
+    pure (x : list)
 
-traverseLinks :: (a -> M b) -> Links a -> Links b
-traverseLinks f (Links opt) = case opt of
-  Nothing -> Links Nothing
-  Just mp -> Links $ Just do
-    (x,xs) <- mp
+traverseLinks :: (a -> M b) -> Links a -> M (Links b)
+traverseLinks f = \case
+  Nil -> pure Nil
+  Cons x xsm -> do
     y <- f x
-    pure (y, traverseLinks f xs)
-
-{-
-_traverseLinksM :: (a -> M b) -> Links a -> M (Links b)
-_traverseLinksM f (Links opt) = pure $ case opt of
-  Nothing -> Links Nothing
-  Just mp -> Links $ Just do
-    (x,xs) <- mp
-    y <- f x
-    ys <- _traverseLinksM f xs
-    pure (y, ys)
--}
+    pure $ Cons y $ do
+      xs <- xsm
+      ys <- traverseLinks f xs -- moving this here was an improvement
+      pure ys
