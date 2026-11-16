@@ -3,7 +3,7 @@ module Browse (dump,interact) where
 import CachedDisk (M,exec)
 import Control.Monad.IO.Class (liftIO)
 import DateTime (Date,Time)
-import Fat16 (Entry(..),Item(..),File(..),Dir(..),getDirEntries,getFileContents,echoRedirect,appendRedirect,mkDir,touch,removeDirEntry)
+import Fat16 (Entry(..),Item(..),File(..),Dir(..),lookupItem,getDirEntries,getFileContents,echoRedirect,appendRedirect,mkDir,touch,removeDirEntry)
 import FileTree (Tree(..),TreeEntry(..),printTree)
 import Prelude hiding (interact)
 import System.Console.ANSI qualified as AN
@@ -195,17 +195,6 @@ lsDirAction dir = do
 
   es <- getDirEntries dir
   mapM_ (liftIO . showEntry) es
-
-lookupItem :: Dir -> Name -> M (Maybe Item)
-lookupItem dir sought = do
-  es <- getDirEntries dir -- TODO: be incremental?
-  case [ item
-       | Entry{longName,item} <- es
-       , longName == sought
-       ] of
-    item:_ -> pure (Just item)
-    [] -> do
-      pure Nothing
 
 errM :: String -> M ()
 errM s = liftIO $ putErr (col AN.Red s ++ "\n")

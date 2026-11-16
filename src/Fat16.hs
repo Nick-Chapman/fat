@@ -4,6 +4,7 @@ module Fat16
   , Item(..)
   , File(..)
   , Dir(..)
+  , lookupItem
   , getDirEntries
   , getFileContents
   , echoRedirect
@@ -33,13 +34,20 @@ data Item = IDir Dir | IFile File deriving (Eq,Show)
 data Dir = Root | Sub { firstCluster :: CN } deriving (Eq,Show)
 data File = File { fileSize :: W32, firstCluster :: CN } deriving (Eq,Show)
 
+lookupItem :: Dir -> String -> M (Maybe Item)
+lookupItem dir sought = dirEntries dir >>= loop
+  where
+    loop :: Links Entry -> M (Maybe Item)
+    loop = \case
+      Nil{} -> pure Nothing
+      Cons e esm -> do
+        let Entry{longName,item} = e
+        if longName == sought then pure (Just item) else
+          esm >>= loop
 
 getDirEntries :: Dir -> M [Entry]
 getDirEntries dir = do
-  slots <- dirEntrySlots dir
-  groups <- groupSlots slots
-  res <- traverseLinks entryOfGroup groups
-  fromLinks res
+  dirEntries dir >>= fromLinks
 
 entryOfGroup :: SlotGroup -> M Entry
 entryOfGroup g@(SlotGroup _ short) = do
@@ -431,8 +439,7 @@ findEntryAddresses sought dir = do
 
 findSlotGroup :: String -> Dir -> M (Maybe SlotGroup)
 findSlotGroup sought dir = do
-  slots <- dirEntrySlots dir
-  groups <- groupSlots slots >>= fromLinks -- TODO: here next
+  groups <- dirGroups dir >>= fromLinks -- TODO: avoid; be incremental
   let
     loop :: [SlotGroup] -> M (Maybe SlotGroup)
     loop = \case
@@ -471,8 +478,18 @@ groupSlots = loop []
             assert (case longs of [] -> True; _ -> False) $ do
             pure Nil
 
-dirEntrySlots :: Dir -> M (Links EntrySlot)
-dirEntrySlots dir = do
+dirEntries :: Dir -> M (Links Entry)
+dirEntries dir = do
+  groups <- dirGroups dir
+  traverseLinks entryOfGroup groups
+
+dirGroups :: Dir -> M (Links SlotGroup)
+dirGroups dir = do
+  slots <- dirSlots dir
+  groupSlots slots
+
+dirSlots :: Dir -> M (Links EntrySlot)
+dirSlots dir = do
   addrs <- dirEntryAdresses dir
   traverseLinks decodeEntrySlot addrs
 
