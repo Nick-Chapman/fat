@@ -390,7 +390,7 @@ getFileContents dr = do
       | otherwise -> do
           si <- siFromClusterNumber cn
           start <- map toChar <$> getBytes si 0 clusterSize
-          stepFatChainL "getFileContents" cn >>= \case
+          stepFatChainL cn >>= \case
             Link_UnAllocated -> error "getFileContents/UnAllocated"
             Link_EndOfChain -> error "getFileContents/EndOfChain"
             Link_NextCluster cn' -> do
@@ -504,7 +504,7 @@ expandClusterChainFrom = loop
     loop :: CN -> M (Links SectorIndex)
     loop cn = do
       si <- siFromClusterNumber cn
-      stepFatChainL "expandClusterChainFrom" cn >>= \case
+      stepFatChainL cn >>= \case
         Link_UnAllocated -> error "expandClusterChainFrom/UnAllocated"
         Link_EndOfChain -> do
           pure $ Cons si (pure Nil)
@@ -592,7 +592,7 @@ shortNameAtShortSlot ShortSlot{addr=(si,so)} = map toChar <$> getBytes si so 11
 
 nextCluster :: CN -> M CN -- allocating if necessary
 nextCluster cn = do
-  stepFatChainL "nextCluster" cn >>= \case
+  stepFatChainL cn >>= \case
     Link_UnAllocated -> undefined
     Link_NextCluster cn' -> pure cn'
     Link_EndOfChain -> do
@@ -616,7 +616,7 @@ allocteCluster = getNextCandidateCN >>= loop
   where
     loop :: CN -> M CN
     loop cn = do
-      stepFatChainL "allocteCluster" cn >>= \case
+      stepFatChainL cn >>= \case
         Link_EndOfChain -> loop (cn+1)
         Link_NextCluster{} -> loop (cn+1)
         Link_UnAllocated -> do
@@ -644,21 +644,19 @@ zeroBytesInClusterChain cn = loop cn
       si <- siFromClusterNumber cn
       let bytes = replicate 512 0x0
       writeSectorBytes si 0 bytes
-      stepFatChainL "zeroBytesInClusterChain" cn >>= \case
+      stepFatChainL cn >>= \case
         Link_UnAllocated -> error "zeroBytesInClusterChain/UnAllocated"
         Link_EndOfChain -> pure ()
         Link_NextCluster cn' -> loop cn'
 
 data Link = Link_UnAllocated | Link_NextCluster CN | Link_EndOfChain
 
-stepFatChainL :: String -> CN -> M Link -- TODO: loose who
-stepFatChainL _who cn = do
-  --_see("stepFatChain",cn,"-->", _who)
+stepFatChainL :: CN -> M Link
+stepFatChainL cn = do
   assert (cn /= 0) $ do
   assert (cn /= 0xffff) $ do
   (si,so) <- cn2sio cn
   cn' <- CN <$> get16 si so
-  --_see("stepFatChain",cn,"-->",cn', _who)
   if
     | cn' == 0 -> pure Link_UnAllocated -- TODO: maybe this case is always an error?
     | cn' == 0xffff -> pure Link_EndOfChain
