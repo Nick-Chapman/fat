@@ -49,16 +49,17 @@ getDirEntries :: Dir -> M [Entry]
 getDirEntries dir = do
   dirEntries dir >>= fromLinks
 
-entryOfGroup :: SlotGroup -> M Entry
-entryOfGroup g@(SlotGroup _ short) = do
-  item <- itemAtShortSlot short
-  shortName <- shortNameAtShortSlot short
-  longName <- if
-    | shortName == ".          " -> pure "."
-    | shortName == "..         " -> pure ".."
-    | otherwise -> longNameOfGroup g
-
-  pure Entry { longName, item }
+entryOfGroup :: SlotGroup -> M (Maybe Entry)
+entryOfGroup = \case
+  Available{} -> pure Nothing
+  Active (ActiveGroup longs short) -> do
+    item <- itemAtShortSlot short
+    shortName <- shortNameAtShortSlot short
+    longName <- if
+      | shortName == ".          " -> pure "."
+      | shortName == "..         " -> pure ".."
+      | otherwise -> longNameOfLongSlots longs
+    pure $ Just $ Entry { longName, item }
 
 touch :: (Date,Time) -> String -> Dir -> M ()
 touch dt longName dir = do
@@ -77,9 +78,10 @@ echoRedirect dt contents longName dir = do
 
 appendRedirect :: (Date,Time) -> String -> String -> Dir -> M ()
 appendRedirect dt extraContents longName dir = do
-  findEntryAddresses longName dir >>= \case
+  findActiveGroup longName dir >>= \case
     Nothing -> echoRedirect dt extraContents longName dir
-    Just (_longAs,addr) -> do
+    Just (ActiveGroup _longs short) -> do
+      let addr = shortAddr short
       cn <- startingClusterFromAddr addr
       fileSize <- fileSizeAtAddr addr
       setFileSizeAtAddr addr (fileSize + fromIntegral (length extraContents))
@@ -107,23 +109,24 @@ dir2cn = \case
   Sub cn -> cn
 
 setStartingCluster :: String -> CN -> Dir -> M ()
-setStartingCluster longName cn dir =
-  findEntryAddr longName dir >>= \case
+setStartingCluster sought cn dir =
+  findActiveGroup sought dir >>= \case
     Nothing -> undefined "impossible, I just added it"
-    Just (si,so) -> do
+    Just (ActiveGroup _ short) -> do
+      let (si,so) = shortAddr short
       set16 si (so + 0x1A) (fromIntegral cn) -- Ox1A is offset of start-cluster in normal entry
-
 
 ----------------------------------------------------------------------
 -- RM
 
 removeDirEntry :: Bool -> String -> Dir -> M ()
 removeDirEntry zeroingContents longName dir = do
-  findEntryAddresses longName dir >>= \case
+  findActiveGroup longName dir >>= \case
     Nothing -> pure () -- nothing to remove
-    Just (longAs,addr) -> do
+    Just (ActiveGroup longs short) -> do
+      mapM_ markEntryAddrUnused (map longAddr longs)
+      let addr = shortAddr short
       markEntryAddrUnused addr
-      mapM_ markEntryAddrUnused longAs
       cn <- startingClusterFromAddr addr
       when zeroingContents $ do
         zeroOutClusterAndSizeInfo addr
@@ -199,8 +202,10 @@ writeSubDirEntryBytesAddr bytes cn (si,so) = do
     si' <- siFromClusterNumber cn'
     writeSectorBytes si' 0 rest
 
-findDirNextEntry :: Int -> Dir -> M (Dir,Addr)
-findDirNextEntry size = \case
+----------------------------------------------------------------------
+-- TODO: kill this old code...
+_old_findDirNextEntry :: Int -> Dir -> M (Dir,Addr)
+_old_findDirNextEntry size = \case
   Root -> do
     addr <- findRootDirNextEntry size
     pure (Root,addr)
@@ -421,67 +426,77 @@ data DirRecordKind = DRK_Normal | DRK_Long | DRK_Unused | DRK_EndOfDir
   deriving (Show,Eq)
 
 ----------------------------------------------------------------------
+
+data Switch = Old | New
+switch :: Switch
+switch = Old
+
+findDirNextEntry :: Int -> Dir -> M (Dir,Addr)
+findDirNextEntry = case switch of Old -> _old_findDirNextEntry; New -> _new_findDirNextEntry
+
+_new_findDirNextEntry :: Int -> Dir -> M (Dir,Addr)
+_new_findDirNextEntry = undefined
+
+----------------------------------------------------------------------
 -- new directory stuff -- TODO: make this subsume all previous dir decodin
 
-findEntryAddr :: String -> Dir -> M (Maybe Addr)
-findEntryAddr sought dir =
-  findEntryAddresses sought dir >>= pure . \case
-    Nothing -> Nothing
-    Just (_,addr) -> Just addr
-
-
-findEntryAddresses :: String -> Dir -> M (Maybe ([Addr],Addr))
-findEntryAddresses sought dir = do
-  findSlotGroup sought dir >>= \case
-    Nothing -> pure Nothing
-    Just (SlotGroup longs short) -> do
-      pure $ Just (map longAddr longs, shortAddr short)
-
-findSlotGroup :: String -> Dir -> M (Maybe SlotGroup)
-findSlotGroup sought dir = do
+findActiveGroup :: String -> Dir -> M (Maybe ActiveGroup)
+findActiveGroup sought dir = do
   groups <- dirGroups dir >>= fromLinks -- TODO: avoid; be incremental
   let
-    loop :: [SlotGroup] -> M (Maybe SlotGroup)
+    loop :: [SlotGroup] -> M (Maybe ActiveGroup)
     loop = \case
       [] -> pure Nothing
-      g:gs -> do
-        longName <- longNameOfGroup g
-        if longName == sought then pure (Just g) else loop gs
+      g:gs -> case g of
+        Available{} -> loop gs
+        Active (ag@(ActiveGroup longs _)) -> do
+          longName <- longNameOfLongSlots longs
+          if longName == sought then pure (Just ag) else loop gs
   loop groups
 
-data SlotGroup = SlotGroup [LongSlot] ShortSlot
+data SlotGroup
+  = Active ActiveGroup
+  | Available { _size :: Int }
 
-longNameOfGroup :: SlotGroup -> M String
-longNameOfGroup (SlotGroup longs _) =
+data ActiveGroup = ActiveGroup [LongSlot] ShortSlot
+
+longNameOfLongSlots :: [LongSlot] -> M String -- TODO: no need to be in M
+longNameOfLongSlots longs =
   pure $ concat [ nameChunk | LongSlot{nameChunk} <- reverse longs ]
 
 groupSlots :: Links EntrySlot -> M (Links SlotGroup)
-groupSlots = loop []
+groupSlots = loop 0 []
   where
-    loop :: [LongSlot] -> Links EntrySlot -> M (Links SlotGroup)
-    loop longs = \case
+    loop :: Int -> [LongSlot] -> Links EntrySlot -> M (Links SlotGroup)
+    loop n longs = \case
       Nil -> pure Nil
       Cons slot slotsm -> do
         case slot of
-          ES_Long long -> do
+          ES_Long long -> maybeConsAvailable <$> do
             slots <- slotsm
-            loop (long:longs) slots
-          ES_Short short -> do
-            let group = SlotGroup (reverse longs) short
+            loop 0 (long:longs) slots
+          ES_Short short -> maybeConsAvailable <$> do
+            let group = Active $ ActiveGroup (reverse longs) short
             pure $ Cons group $ do
               slots <- slotsm -- Moving this here is the fix!
-              loop [] slots
+              loop 0 [] slots
           ES_Open -> do
             slots <- slotsm
-            loop longs slots
-          ES_OpenEnd -> do
+            loop (n+1) longs slots
+          ES_OpenEnd -> maybeConsAvailable <$> do
             assert (case longs of [] -> True; _ -> False) $ do
             pure Nil
+          where
+            maybeConsAvailable :: Links SlotGroup -> Links SlotGroup
+            maybeConsAvailable links = if
+              | n == 0 -> links
+              | otherwise -> do
+                Cons (Available n) (pure links)
 
 dirEntries :: Dir -> M (Links Entry)
 dirEntries dir = do
   groups <- dirGroups dir
-  traverseLinks entryOfGroup groups
+  traverseMaybeLinks entryOfGroup groups
 
 dirGroups :: Dir -> M (Links SlotGroup)
 dirGroups dir = do
@@ -735,3 +750,15 @@ traverseLinks f = \case
       xs <- xsm
       ys <- traverseLinks f xs -- moving this here was an improvement
       pure ys
+
+traverseMaybeLinks :: (a -> M (Maybe b)) -> Links a -> M (Links b)
+traverseMaybeLinks f = \case
+  Nil -> pure Nil
+  Cons x xsm -> do
+    f x >>= \case
+      Nothing -> xsm >>= traverseMaybeLinks f
+      Just y -> do
+        pure $ Cons y $ do
+          xs <- xsm
+          ys <- traverseMaybeLinks f xs -- moving this here was an improvement
+          pure ys
