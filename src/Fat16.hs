@@ -69,10 +69,10 @@ entryOfGroup = \case
   Group_Active (ActiveGroup longs short) -> do
     item <- itemAtShortSlot short
     shortName <- shortNameAtShortSlot short
-    longName <- if
-      | shortName == ".          " -> pure "."
-      | shortName == "..         " -> pure ".."
-      | otherwise -> longNameOfLongSlots longs
+    let longName = if
+          | shortName == ".          " -> "."
+          | shortName == "..         " -> ".."
+          | otherwise                  -> longNameOfLongSlots longs
     pure $ Just $ Entry { longName, item }
 
 touch :: (Date,Time) -> String -> Dir -> M ()
@@ -371,7 +371,7 @@ findActiveGroup sought dir = do
         Group_OpenEnd{} -> pure Nothing
         Group_Open{} -> gsm >>= loop
         Group_Active (ag@(ActiveGroup longs _)) -> do
-          longName <- longNameOfLongSlots longs
+          let longName = longNameOfLongSlots longs
           if longName == sought then pure (Just ag) else gsm >>= loop
 
 
@@ -382,9 +382,9 @@ data Group
 
 data ActiveGroup = ActiveGroup [LongSlot] ShortSlot
 
-longNameOfLongSlots :: [LongSlot] -> M String -- TODO: no need to be in M
+longNameOfLongSlots :: [LongSlot] -> String
 longNameOfLongSlots longs =
-  pure $ concat [ nameChunk | LongSlot{nameChunk} <- reverse longs ]
+  concat [ nameChunk | LongSlot{nameChunk} <- reverse longs ]
 
 dirGroups :: Bool -> Dir -> M (List Group)
 dirGroups openNew dir = do
@@ -491,12 +491,11 @@ decodeEntrySlot dir addr@(si,so) = do
     | firstByte == 0x00 -> pure (ES_OpenEnd dir addr)
     | firstByte == 0xE5 -> pure (ES_Open dir addr)
     | (attr .&. 0xF) == 0xF -> do
-        nameChunk <- getLongNameChunk addr -- TODO: Maybe delay this
+        nameChunk <- getLongNameChunk addr
         pure (ES_Long (LongSlot {addr,nameChunk}))
     | otherwise -> do
         pure (ES_Short (ShortSlot {addr}))
 
--- grabbed this from earlier coding
 getLongNameChunk :: Addr -> M String
 getLongNameChunk (si,so) = do
   bs <- sequence [ get8 si (so+i) | i <- [1,3,5,7,9, 14,16,18,20,22,24, 28,30] ]
