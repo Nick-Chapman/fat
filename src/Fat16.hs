@@ -366,18 +366,18 @@ findDirNextEntry need dir0 = dirGroups True dir0 >>= loop
 
 findActiveGroup :: String -> Dir -> M (Maybe ActiveGroup)
 findActiveGroup sought dir = do
-  groups <- dirGroups False dir >>= fromLinks -- TODO: avoid; be incremental
-  let
-    loop :: [Group] -> M (Maybe ActiveGroup)
+  dirGroups False dir >>= loop
+  where
+    loop :: Links Group -> M (Maybe ActiveGroup)
     loop = \case
-      [] -> error "findActiveGroup/[]"
-      g:gs -> case g of
+      Nil -> error "findActiveGroup/[]"
+      Cons g gsm -> case g of
         Group_OpenEnd{} -> pure Nothing
-        Group_Open{} -> loop gs
+        Group_Open{} -> gsm >>= loop
         Group_Active (ag@(ActiveGroup longs _)) -> do
           longName <- longNameOfLongSlots longs
-          if longName == sought then pure (Just ag) else loop gs
-  loop groups
+          if longName == sought then pure (Just ag) else gsm >>= loop
+
 
 data Group
   = Group_Active ActiveGroup
@@ -662,7 +662,7 @@ cn2sio cn = do
 ----------------------------------------------------------------------
 -- Links: monad aware list
 
-data Links a = Nil | Cons a (M (Links a))
+data Links a = Nil | Cons a (M (Links a)) -- TODO: rename List
 
 toLinks :: [a] -> Links a
 toLinks = \case
