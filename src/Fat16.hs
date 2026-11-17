@@ -50,21 +50,17 @@ getDirEntries dir = do
   dirEntries dir >>= fromLinks
 
 dirEntries :: Dir -> M (Links Entry)
-dirEntries dir = do
-  groups <- dirGroups False dir
-  traverseMaybeLinks entryOfGroup groups
-
-traverseMaybeLinks :: (a -> M (Maybe b)) -> Links a -> M (Links b) -- TODO: specialize
-traverseMaybeLinks f = \case
-  Nil -> pure Nil
-  Cons x xsm -> do
-    f x >>= \case
-      Nothing -> xsm >>= traverseMaybeLinks f
-      Just y -> do
-        pure $ Cons y $ do
-          xs <- xsm
-          ys <- traverseMaybeLinks f xs -- moving this here was an improvement
-          pure ys
+dirEntries dir = dirGroups False dir >>= loop
+  where
+    loop :: Links Group -> M (Links Entry)
+    loop = \case
+      Nil -> pure Nil
+      Cons x xsm -> do
+        entryOfGroup x >>= \case
+          Nothing -> xsm >>= loop
+          Just y -> do
+            pure $ Cons y $ do
+              xsm >>= loop
 
 entryOfGroup :: Group -> M (Maybe Entry)
 entryOfGroup = \case
@@ -476,14 +472,11 @@ expandClusterChainFrom = loop
     loop :: CN -> M (Links (Dir,SectorIndex))
     loop cn = do
       si <- siFromClusterNumber cn
-      stepFatChainL cn >>= \case
-        Link_UnAllocated -> error "expandClusterChainFrom/UnAllocated"
-        Link_EndOfChain -> do
-          pure $ Cons (Sub cn, si) (pure Nil) -- TODO: lift/share this cons
-        Link_NextCluster cn' -> do
-          pure $ Cons (Sub cn, si) $ do
-            more <- loop cn'
-            pure more
+      pure $ Cons (Sub cn, si) $ do
+        stepFatChainL cn >>= \case
+          Link_UnAllocated -> error "expandClusterChainFrom/UnAllocated"
+          Link_EndOfChain -> pure Nil
+          Link_NextCluster cn' -> loop cn'
 
 entryAddressesAtSector :: SectorIndex -> [Addr] -- # (512/32 = 16)
 entryAddressesAtSector si = do
