@@ -49,10 +49,28 @@ getDirEntries :: Dir -> M [Entry]
 getDirEntries dir = do
   dirEntries dir >>= fromLinks
 
-entryOfGroup :: SlotGroup -> M (Maybe Entry)
+dirEntries :: Dir -> M (Links Entry)
+dirEntries dir = do
+  groups <- dirGroups False dir
+  traverseMaybeLinks entryOfGroup groups
+
+traverseMaybeLinks :: (a -> M (Maybe b)) -> Links a -> M (Links b) -- TODO: specialize
+traverseMaybeLinks f = \case
+  Nil -> pure Nil
+  Cons x xsm -> do
+    f x >>= \case
+      Nothing -> xsm >>= traverseMaybeLinks f
+      Just y -> do
+        pure $ Cons y $ do
+          xs <- xsm
+          ys <- traverseMaybeLinks f xs -- moving this here was an improvement
+          pure ys
+
+entryOfGroup :: Group -> M (Maybe Entry)
 entryOfGroup = \case
-  Available{} -> pure Nothing
-  Active (ActiveGroup longs short) -> do
+  Group_Open{} -> pure Nothing
+  Group_OpenEnd{} -> pure Nothing
+  Group_Active (ActiveGroup longs short) -> do
     item <- itemAtShortSlot short
     shortName <- shortNameAtShortSlot short
     longName <- if
@@ -429,34 +447,48 @@ data DirRecordKind = DRK_Normal | DRK_Long | DRK_Unused | DRK_EndOfDir
 
 data Switch = Old | New
 switch :: Switch
-switch = Old
+switch = New
 
 findDirNextEntry :: Int -> Dir -> M (Dir,Addr)
 findDirNextEntry = case switch of Old -> _old_findDirNextEntry; New -> _new_findDirNextEntry
 
 _new_findDirNextEntry :: Int -> Dir -> M (Dir,Addr)
-_new_findDirNextEntry = undefined
+_new_findDirNextEntry need dir0 = dirGroups True dir0 >>= loop
+  where
+    loop :: Links Group -> M (Dir,Addr)
+    loop = \case
+      Nil{} -> error "findDirNextEntry/Nil" -- expect Group_OpenEnd
+      Cons g gsm -> do
+        case g of
+          Group_Active{} -> gsm >>= loop
+          Group_Open{size,dir,addr} -> do
+            if size < need then gsm >>= loop else do
+              pure (dir,addr)
+          Group_OpenEnd dir addr -> do
+            pure (dir,addr)
 
 ----------------------------------------------------------------------
 -- new directory stuff -- TODO: make this subsume all previous dir decodin
 
 findActiveGroup :: String -> Dir -> M (Maybe ActiveGroup)
 findActiveGroup sought dir = do
-  groups <- dirGroups dir >>= fromLinks -- TODO: avoid; be incremental
+  groups <- dirGroups False dir >>= fromLinks -- TODO: avoid; be incremental
   let
-    loop :: [SlotGroup] -> M (Maybe ActiveGroup)
+    loop :: [Group] -> M (Maybe ActiveGroup)
     loop = \case
-      [] -> pure Nothing
+      [] -> pure Nothing -- error "findActiveGroup/[]"
       g:gs -> case g of
-        Available{} -> loop gs
-        Active (ag@(ActiveGroup longs _)) -> do
+        Group_OpenEnd{} -> pure Nothing
+        Group_Open{} -> loop gs
+        Group_Active (ag@(ActiveGroup longs _)) -> do
           longName <- longNameOfLongSlots longs
           if longName == sought then pure (Just ag) else loop gs
   loop groups
 
-data SlotGroup
-  = Active ActiveGroup
-  | Available { _size :: Int }
+data Group
+  = Group_Active ActiveGroup
+  | Group_Open { size :: Int, dir :: Dir, addr :: Addr }
+  | Group_OpenEnd Dir Addr
 
 data ActiveGroup = ActiveGroup [LongSlot] ShortSlot
 
@@ -464,84 +496,98 @@ longNameOfLongSlots :: [LongSlot] -> M String -- TODO: no need to be in M
 longNameOfLongSlots longs =
   pure $ concat [ nameChunk | LongSlot{nameChunk} <- reverse longs ]
 
-groupSlots :: Links EntrySlot -> M (Links SlotGroup)
-groupSlots = loop 0 []
+dirGroups :: Bool -> Dir -> M (Links Group)
+dirGroups openNew dir = do
+  slots <- dirSlots openNew dir
+  groupSlots slots
+
+dirSlots :: Bool -> Dir -> M (Links EntrySlot)
+dirSlots openNew dir0 = do dirSectors dir0 >>= loopSis dir0
   where
-    loop :: Int -> [LongSlot] -> Links EntrySlot -> M (Links SlotGroup)
-    loop n longs = \case
+    loopSis :: Dir -> Links (Dir,SectorIndex) -> M (Links EntrySlot)
+    loopSis dir = \case
+      Nil -> if
+        | openNew -> do
+            case dir of
+              Root -> do
+                pure Nil
+              Sub cn -> do
+                cn' <- nextCluster cn
+                si' <- siFromClusterNumber cn'
+                let a'= (si',0)
+                let g = ES_OpenEnd (Sub cn') a'
+                pure (Cons g (pure Nil))
+        | otherwise ->
+          pure Nil
+      Cons (dir,si) xsm -> loopAddrs (entryAddressesAtSector si)
+        where
+          loopAddrs :: [Addr] -> M (Links EntrySlot)
+          loopAddrs = \case
+            [] -> xsm >>= loopSis dir
+            addr:addrs -> do
+              slot <- decodeEntrySlot dir addr
+              pure $ Cons slot $ do
+                loopAddrs addrs
+
+groupSlots :: Links EntrySlot -> M (Links Group)
+groupSlots = loop Nothing []
+  where
+    loop :: Maybe (Int,Dir,Addr) -> [LongSlot] -> Links EntrySlot -> M (Links Group)
+    loop gap longs = \case
       Nil -> pure Nil
       Cons slot slotsm -> do
         case slot of
           ES_Long long -> maybeConsAvailable <$> do
             slots <- slotsm
-            loop 0 (long:longs) slots
+            loop Nothing (long:longs) slots
           ES_Short short -> maybeConsAvailable <$> do
-            let group = Active $ ActiveGroup (reverse longs) short
+            let group = Group_Active $ ActiveGroup (reverse longs) short
             pure $ Cons group $ do
               slots <- slotsm -- Moving this here is the fix!
-              loop 0 [] slots
-          ES_Open -> do
-            slots <- slotsm
-            loop (n+1) longs slots
-          ES_OpenEnd -> maybeConsAvailable <$> do
+              loop Nothing [] slots
+          ES_Open dir addr -> do
             assert (case longs of [] -> True; _ -> False) $ do
-            pure Nil
+            slots <- slotsm
+            let an = case gap of Nothing -> (1,dir,addr); Just (n,d,a) -> (n+1,d,a)
+            loop (Just an) [] slots
+          ES_OpenEnd dir addr -> do
+            assert (case longs of [] -> True; _ -> False) $ do
+            let g = case gap of
+                  Just (_,d,a) -> Group_OpenEnd d a
+                  Nothing -> Group_OpenEnd dir addr
+            pure (Cons g (pure Nil))
           where
-            maybeConsAvailable :: Links SlotGroup -> Links SlotGroup
-            maybeConsAvailable links = if
-              | n == 0 -> links
-              | otherwise -> do
-                Cons (Available n) (pure links)
+            maybeConsAvailable :: Links Group -> Links Group
+            maybeConsAvailable links =
+              case gap of
+                Nothing -> links
+                Just (size,dir,addr) -> do
+                  let g = Group_Open { size, dir, addr }
+                  Cons g (pure links)
 
-dirEntries :: Dir -> M (Links Entry)
-dirEntries dir = do
-  groups <- dirGroups dir
-  traverseMaybeLinks entryOfGroup groups
-
-dirGroups :: Dir -> M (Links SlotGroup)
-dirGroups dir = do
-  slots <- dirSlots dir
-  groupSlots slots
-
-dirSlots :: Dir -> M (Links EntrySlot)
-dirSlots dir = do
-  addrs <- dirEntryAdresses dir
-  traverseLinks decodeEntrySlot addrs
-
-dirEntryAdresses :: Dir -> M (Links Addr)
-dirEntryAdresses dir = dirSectors dir >>= loop
-  where
-    loop :: Links SectorIndex -> M (Links Addr)
-    loop = \case
-      Nil -> pure Nil
-      Cons si morem -> do
-        prefixLinks (entryAddressesAtSector si) $ do
-          more <- morem
-          loop more
-
-dirSectors :: Dir -> M (Links SectorIndex)
+dirSectors :: Dir -> M (Links (Dir,SectorIndex))
 dirSectors = \case
   Root -> rootSectors
   Sub cn -> expandClusterChainFrom cn
 
-rootSectors :: M (Links SectorIndex)
+rootSectors :: M (Links (Dir,SectorIndex))
 rootSectors = do
   VolumeInfo{rootDirBegin,clusterBegin} <- volume
   let n = fromIntegral (clusterBegin - rootDirBegin)
-  pure $ toLinks (take n [rootDirBegin .. ])
+  pure $ toLinks [ (Root,si) | si <- take n [rootDirBegin .. ] ]
 
-expandClusterChainFrom :: CN -> M (Links SectorIndex)
+expandClusterChainFrom :: CN -> M (Links (Dir,SectorIndex))
 expandClusterChainFrom = loop
   where
-    loop :: CN -> M (Links SectorIndex)
+    loop :: CN -> M (Links (Dir,SectorIndex))
     loop cn = do
       si <- siFromClusterNumber cn
       stepFatChainL cn >>= \case
         Link_UnAllocated -> error "expandClusterChainFrom/UnAllocated"
         Link_EndOfChain -> do
-          pure $ Cons si (pure Nil)
+          pure $ Cons (Sub cn, si) (pure Nil) -- TODO: lift/share this cons
         Link_NextCluster cn' -> do
-          pure $ Cons si $ do
+          pure $ Cons (Sub cn, si) $ do
             more <- loop cn'
             pure more
 
@@ -551,13 +597,13 @@ entryAddressesAtSector si = do
   let numEntrySlotsInSector = sectorSize `div` sizeDirSlot
   [ (si,32 * so) | so <- take numEntrySlotsInSector [0..] ]
 
-decodeEntrySlot :: Addr -> M EntrySlot
-decodeEntrySlot addr@(si,so) = do
+decodeEntrySlot :: Dir -> Addr -> M EntrySlot
+decodeEntrySlot dir addr@(si,so) = do
   firstByte <- get8 si so
   attr <- get8 si (so+0xB)
   if
-    | firstByte == 0x00 -> pure ES_OpenEnd
-    | firstByte == 0xE5 -> pure ES_Open
+    | firstByte == 0x00 -> pure (ES_OpenEnd dir addr)
+    | firstByte == 0xE5 -> pure (ES_Open dir addr)
     | (attr .&. 0xF) == 0xF -> do
         nameChunk <- getLongNameChunk addr -- TODO: Maybe delay this
         pure (ES_Long (LongSlot {addr,nameChunk}))
@@ -573,8 +619,8 @@ getLongNameChunk (si,so) = do
 data EntrySlot
   = ES_Long LongSlot
   | ES_Short ShortSlot
-  | ES_Open
-  | ES_OpenEnd
+  | ES_Open Dir Addr
+  | ES_OpenEnd Dir Addr
   deriving Show
 
 data LongSlot = LongSlot
@@ -725,9 +771,6 @@ cn2sio cn = do
 
 data Links a = Nil | Cons a (M (Links a))
 
-prefixLinks :: [a] -> M (Links a) -> M (Links a)
-prefixLinks xs l = foldr (\x xs -> pure (Cons x xs)) l xs
-
 toLinks :: [a] -> Links a
 toLinks = \case
   [] -> Nil
@@ -740,25 +783,3 @@ fromLinks = \case
     xs <- xsm
     list <- fromLinks xs
     pure (x : list)
-
-traverseLinks :: (a -> M b) -> Links a -> M (Links b)
-traverseLinks f = \case
-  Nil -> pure Nil
-  Cons x xsm -> do
-    y <- f x
-    pure $ Cons y $ do
-      xs <- xsm
-      ys <- traverseLinks f xs -- moving this here was an improvement
-      pure ys
-
-traverseMaybeLinks :: (a -> M (Maybe b)) -> Links a -> M (Links b)
-traverseMaybeLinks f = \case
-  Nil -> pure Nil
-  Cons x xsm -> do
-    f x >>= \case
-      Nothing -> xsm >>= traverseMaybeLinks f
-      Just y -> do
-        pure $ Cons y $ do
-          xs <- xsm
-          ys <- traverseMaybeLinks f xs -- moving this here was an improvement
-          pure ys
