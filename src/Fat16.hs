@@ -221,66 +221,6 @@ writeSubDirEntryBytesAddr bytes cn (si,so) = do
     writeSectorBytes si' 0 rest
 
 ----------------------------------------------------------------------
--- TODO: kill this old code...
-_old_findDirNextEntry :: Int -> Dir -> M (Dir,Addr)
-_old_findDirNextEntry size = \case
-  Root -> do
-    addr <- findRootDirNextEntry size
-    pure (Root,addr)
-  Sub cn -> do
-    (cn,addr) <- findSubDirNextEntry size cn
-    pure (Sub cn, addr)
-
-findRootDirNextEntry :: Int -> M Addr
-findRootDirNextEntry size = do
-  VolumeInfo{rootDirBegin} <- volume
-  loop0 (rootDirBegin,0)
-  where
-    loop0 :: Addr -> M Addr
-    loop0 addr = loop size addr addr
-
-    loop :: Int -> Addr -> Addr -> M Addr
-    loop need candidateAddr (si,so) = if
-      | fromIntegral so >= sectorSize -> do
-          loop need candidateAddr (si+1, 0)
-      | otherwise -> do
-          DirRecord{kind} <- getDirRecord "" si so
-          case kind of
-            DRK_EndOfDir -> pure candidateAddr
-            DRK_Unused -> do
-              if need == 1
-                then pure candidateAddr
-                else loop (need-1) candidateAddr (si, so + fromIntegral bytesPerDirEntry)
-            _ ->
-              loop0 (si, so + fromIntegral bytesPerDirEntry)
-
-findSubDirNextEntry :: Int -> CN -> M (CN,Addr)
-findSubDirNextEntry size cn = do
-  si <- siFromClusterNumber cn
-  loop0 cn (si, 0)
-  where
-    loop0 :: CN -> Addr -> M (CN,Addr)
-    loop0 cn a = loop size (cn,a) cn a
-
-    loop :: Int -> (CN,Addr) -> CN -> Addr -> M (CN,Addr)
-    loop need candidateRes cn (si,so) = if
-      | fromIntegral so >= sectorSize -> do
-          cn' <- nextCluster cn
-          si' <- siFromClusterNumber cn'
-          loop need candidateRes cn' (si', 0)
-      | otherwise -> do
-          DirRecord{kind} <- getDirRecord "" si so
-          case kind of
-            DRK_EndOfDir -> pure (cn,(si,so))
-            DRK_Unused -> do
-              if need == 1
-                then pure candidateRes
-                else loop (need-1) candidateRes cn (si, so + fromIntegral bytesPerDirEntry)
-            _ ->
-              loop0 cn (si, so + fromIntegral bytesPerDirEntry)
-
-
-----------------------------------------------------------------------
 -- DIRECTORY encode
 
 encodeEntry :: String -> StandardEntry -> [W8]
@@ -382,31 +322,6 @@ encodeStandardEntry e = do
 trunOrPadSpace :: Int -> String -> String
 trunOrPadSpace n s = take n (s ++ repeat ' ')
 
-getDirRecord :: String -> SectorIndex -> SectorOffset -> M DirRecord -- TODO kill
-getDirRecord acc si so = do
-  firstByte <- get8 si so
-  attr <- get8 si (so+0xB)
-  let
-    kind = if
-      | firstByte == 0x00 -> DRK_EndOfDir
-      | firstByte == 0xE5 -> DRK_Unused
-      | (attr .&. 0xF) == 0xF -> DRK_Long
-      | otherwise -> DRK_Normal
-  firstCluster <- CN <$> get16 si (so + 0x1A)
-  fileSize <- get32 si (so + 0x1C)
-  shortName <- map toChar <$> getBytes si so 11
-  let longName = if
-        | shortName == ".          " -> "."
-        | shortName == "..         " -> ".."
-        | otherwise -> acc
-  let isDir = (attr .&. 0x10) /= 0
-  pure DirRecord { kind
-                 -- ,attr
-                 ,firstCluster,fileSize
-                 --,shortName
-                 ,longName,isDir
-                 }
-
 getFileContents :: File -> M String
 getFileContents dr = do
   VolumeInfo{sectorsPerCluster} <- volume
@@ -429,31 +344,10 @@ getFileContents dr = do
               pure (start ++ rest)
   loop firstCluster (fromIntegral fileSize)
 
-data DirRecord = DirRecord -- TODO: kill
-  { kind :: DirRecordKind
---  , attr :: W8
-  , firstCluster :: CN
-  , fileSize :: W32
---  , shortName :: String
-  , longName :: String
-  , isDir :: Bool
-  } deriving Show
-
-
-data DirRecordKind = DRK_Normal | DRK_Long | DRK_Unused | DRK_EndOfDir
-  deriving (Show,Eq)
-
 ----------------------------------------------------------------------
 
-data Switch = Old | New
-switch :: Switch
-switch = New
-
 findDirNextEntry :: Int -> Dir -> M (Dir,Addr)
-findDirNextEntry = case switch of Old -> _old_findDirNextEntry; New -> _new_findDirNextEntry
-
-_new_findDirNextEntry :: Int -> Dir -> M (Dir,Addr)
-_new_findDirNextEntry need dir0 = dirGroups True dir0 >>= loop
+findDirNextEntry need dir0 = dirGroups True dir0 >>= loop
   where
     loop :: Links Group -> M (Dir,Addr)
     loop = \case
@@ -468,7 +362,7 @@ _new_findDirNextEntry need dir0 = dirGroups True dir0 >>= loop
             pure (dir,addr)
 
 ----------------------------------------------------------------------
--- new directory stuff -- TODO: make this subsume all previous dir decodin
+-- new directory stuff
 
 findActiveGroup :: String -> Dir -> M (Maybe ActiveGroup)
 findActiveGroup sought dir = do
@@ -476,7 +370,7 @@ findActiveGroup sought dir = do
   let
     loop :: [Group] -> M (Maybe ActiveGroup)
     loop = \case
-      [] -> pure Nothing -- error "findActiveGroup/[]"
+      [] -> error "findActiveGroup/[]"
       g:gs -> case g of
         Group_OpenEnd{} -> pure Nothing
         Group_Open{} -> loop gs
@@ -593,8 +487,7 @@ expandClusterChainFrom = loop
 
 entryAddressesAtSector :: SectorIndex -> [Addr] -- # (512/32 = 16)
 entryAddressesAtSector si = do
-  let sizeDirSlot = 32
-  let numEntrySlotsInSector = sectorSize `div` sizeDirSlot
+  let numEntrySlotsInSector = sectorSize `div` bytesPerDirEntry
   [ (si,32 * so) | so <- take numEntrySlotsInSector [0..] ]
 
 decodeEntrySlot :: Dir -> Addr -> M EntrySlot
