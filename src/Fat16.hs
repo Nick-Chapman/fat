@@ -37,7 +37,7 @@ data File = File { fileSize :: W32, firstCluster :: CN } deriving (Eq,Show)
 lookupItem :: Dir -> String -> M (Maybe Item)
 lookupItem dir sought = dirEntries dir >>= loop
   where
-    loop :: Links Entry -> M (Maybe Item)
+    loop :: List Entry -> M (Maybe Item)
     loop = \case
       Nil{} -> pure Nothing
       Cons e esm -> do
@@ -47,12 +47,12 @@ lookupItem dir sought = dirEntries dir >>= loop
 
 getDirEntries :: Dir -> M [Entry]
 getDirEntries dir = do
-  dirEntries dir >>= fromLinks
+  dirEntries dir >>= fromList
 
-dirEntries :: Dir -> M (Links Entry)
+dirEntries :: Dir -> M (List Entry)
 dirEntries dir = dirGroups False dir >>= loop
   where
-    loop :: Links Group -> M (Links Entry)
+    loop :: List Group -> M (List Entry)
     loop = \case
       Nil -> pure Nil
       Cons x xsm -> do
@@ -345,7 +345,7 @@ getFileContents dr = do
 findDirNextEntry :: Int -> Dir -> M (Dir,Addr)
 findDirNextEntry need dir0 = dirGroups True dir0 >>= loop
   where
-    loop :: Links Group -> M (Dir,Addr)
+    loop :: List Group -> M (Dir,Addr)
     loop = \case
       Nil{} -> error "findDirNextEntry/Nil" -- expect Group_OpenEnd
       Cons g gsm -> do
@@ -364,7 +364,7 @@ findActiveGroup :: String -> Dir -> M (Maybe ActiveGroup)
 findActiveGroup sought dir = do
   dirGroups False dir >>= loop
   where
-    loop :: Links Group -> M (Maybe ActiveGroup)
+    loop :: List Group -> M (Maybe ActiveGroup)
     loop = \case
       Nil -> error "findActiveGroup/[]"
       Cons g gsm -> case g of
@@ -386,15 +386,15 @@ longNameOfLongSlots :: [LongSlot] -> M String -- TODO: no need to be in M
 longNameOfLongSlots longs =
   pure $ concat [ nameChunk | LongSlot{nameChunk} <- reverse longs ]
 
-dirGroups :: Bool -> Dir -> M (Links Group)
+dirGroups :: Bool -> Dir -> M (List Group)
 dirGroups openNew dir = do
   slots <- dirSlots openNew dir
   groupSlots slots
 
-dirSlots :: Bool -> Dir -> M (Links EntrySlot)
+dirSlots :: Bool -> Dir -> M (List EntrySlot)
 dirSlots openNew dir0 = do dirSectors dir0 >>= loopSis dir0
   where
-    loopSis :: Dir -> Links (Dir,SectorIndex) -> M (Links EntrySlot)
+    loopSis :: Dir -> List (Dir,SectorIndex) -> M (List EntrySlot)
     loopSis dir = \case
       Nil -> if
         | openNew -> do
@@ -411,7 +411,7 @@ dirSlots openNew dir0 = do dirSectors dir0 >>= loopSis dir0
           pure Nil
       Cons (dir,si) xsm -> loopAddrs (entryAddressesAtSector si)
         where
-          loopAddrs :: [Addr] -> M (Links EntrySlot)
+          loopAddrs :: [Addr] -> M (List EntrySlot)
           loopAddrs = \case
             [] -> xsm >>= loopSis dir
             addr:addrs -> do
@@ -419,10 +419,10 @@ dirSlots openNew dir0 = do dirSectors dir0 >>= loopSis dir0
               pure $ Cons slot $ do
                 loopAddrs addrs
 
-groupSlots :: Links EntrySlot -> M (Links Group)
+groupSlots :: List EntrySlot -> M (List Group)
 groupSlots = loop Nothing []
   where
-    loop :: Maybe (Int,Dir,Addr) -> [LongSlot] -> Links EntrySlot -> M (Links Group)
+    loop :: Maybe (Int,Dir,Addr) -> [LongSlot] -> List EntrySlot -> M (List Group)
     loop gap longs = \case
       Nil -> pure Nil
       Cons slot slotsm -> do
@@ -447,7 +447,7 @@ groupSlots = loop Nothing []
                   Nothing -> Group_OpenEnd dir addr
             pure (Cons g (pure Nil))
           where
-            maybeConsAvailable :: Links Group -> Links Group
+            maybeConsAvailable :: List Group -> List Group
             maybeConsAvailable links =
               case gap of
                 Nothing -> links
@@ -455,21 +455,21 @@ groupSlots = loop Nothing []
                   let g = Group_Open { size, dir, addr }
                   Cons g (pure links)
 
-dirSectors :: Dir -> M (Links (Dir,SectorIndex))
+dirSectors :: Dir -> M (List (Dir,SectorIndex))
 dirSectors = \case
   Root -> rootSectors
   Sub cn -> expandClusterChainFrom cn
 
-rootSectors :: M (Links (Dir,SectorIndex))
+rootSectors :: M (List (Dir,SectorIndex))
 rootSectors = do
   VolumeInfo{rootDirBegin,clusterBegin} <- volume
   let n = fromIntegral (clusterBegin - rootDirBegin)
-  pure $ toLinks [ (Root,si) | si <- take n [rootDirBegin .. ] ]
+  pure $ toList [ (Root,si) | si <- take n [rootDirBegin .. ] ]
 
-expandClusterChainFrom :: CN -> M (Links (Dir,SectorIndex))
+expandClusterChainFrom :: CN -> M (List (Dir,SectorIndex))
 expandClusterChainFrom = loop
   where
-    loop :: CN -> M (Links (Dir,SectorIndex))
+    loop :: CN -> M (List (Dir,SectorIndex))
     loop cn = do
       si <- siFromClusterNumber cn
       pure $ Cons (Sub cn, si) $ do
@@ -653,19 +653,18 @@ cn2sio cn = do
   pure (si,so)
 
 ----------------------------------------------------------------------
--- Links: monad aware list
 
-data Links a = Nil | Cons a (M (Links a)) -- TODO: rename List
+data List a = Nil | Cons a (M (List a)) -- monad aware list
 
-toLinks :: [a] -> Links a
-toLinks = \case
+toList :: [a] -> List a
+toList = \case
   [] -> Nil
-  x:xs -> Cons x (pure (toLinks xs))
+  x:xs -> Cons x (pure (toList xs))
 
-fromLinks :: Links a -> M [a]
-fromLinks = \case
+fromList :: List a -> M [a]
+fromList = \case
   Nil -> pure []
   Cons x xsm -> do
     xs <- xsm
-    list <- fromLinks xs
+    list <- fromList xs
     pure (x : list)
