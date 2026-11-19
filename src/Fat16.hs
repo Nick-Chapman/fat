@@ -334,7 +334,6 @@ getFileContents dr = do
           si <- siFromClusterNumber cn
           start <- map toChar <$> getBytes si 0 clusterSize
           stepFatChainL cn >>= \case
-            Link_UnAllocated -> error "getFileContents/UnAllocated"
             Link_EndOfChain -> error "getFileContents/EndOfChain"
             Link_NextCluster cn' -> do
               rest <- loop cn' (size - clusterSize)
@@ -475,7 +474,6 @@ expandClusterChainFrom = loop
       si <- siFromClusterNumber cn
       pure $ Cons (Sub cn, si) $ do
         stepFatChainL cn >>= \case
-          Link_UnAllocated -> error "expandClusterChainFrom/UnAllocated"
           Link_EndOfChain -> pure Nil
           Link_NextCluster cn' -> loop cn'
 
@@ -557,7 +555,6 @@ shortNameAtShortSlot ShortSlot{addr=(si,so)} = map toChar <$> getBytes si so 11
 nextCluster :: CN -> M CN -- allocating if necessary
 nextCluster cn = do
   stepFatChainL cn >>= \case
-    Link_UnAllocated -> undefined
     Link_NextCluster cn' -> pure cn'
     Link_EndOfChain -> do
       cn' <- allocteCluster
@@ -574,19 +571,6 @@ setLastAllocatedCN :: CN -> M ()
 setLastAllocatedCN cn = do
   lastAllocatedCN <- getLastAllocatedCN
   liftIO $ writeIORef lastAllocatedCN cn
-
-allocteCluster :: M CN
-allocteCluster = getNextCandidateCN >>= loop
-  where
-    loop :: CN -> M CN
-    loop cn = do
-      stepFatChainL cn >>= \case
-        Link_EndOfChain -> loop (cn+1)
-        Link_NextCluster{} -> loop (cn+1)
-        Link_UnAllocated -> do
-          setNextCluser cn 0xffff
-          setLastAllocatedCN cn
-          pure cn
 
 clearFatChain :: CN -> M ()
 clearFatChain = loop
@@ -609,11 +593,10 @@ zeroBytesInClusterChain cn = loop cn
       let bytes = replicate 512 0x0
       writeSectorBytes si 0 bytes
       stepFatChainL cn >>= \case
-        Link_UnAllocated -> error "zeroBytesInClusterChain/UnAllocated"
         Link_EndOfChain -> pure ()
         Link_NextCluster cn' -> loop cn'
 
-data Link = Link_UnAllocated | Link_NextCluster CN | Link_EndOfChain
+data Link = Link_NextCluster CN | Link_EndOfChain
 
 stepFatChainL :: CN -> M Link
 stepFatChainL cn = do
@@ -622,9 +605,33 @@ stepFatChainL cn = do
   (si,so) <- cn2sio cn
   cn' <- CN <$> get16 si so
   if
-    | cn' == 0 -> pure Link_UnAllocated -- TODO: maybe this case is always an error?
+    | cn' == 0 -> error "stepFatChainL/Unallocated"
     | cn' == 0xffff -> pure Link_EndOfChain
     | otherwise -> pure (Link_NextCluster cn')
+
+allocteCluster :: M CN
+allocteCluster = do
+  cn <- findFreeCluster
+  setNextCluser cn 0xffff
+  setLastAllocatedCN cn
+  pure cn
+
+findFreeCluster :: M CN
+findFreeCluster = getNextCandidateCN >>= loop
+  where
+    loop :: CN -> M CN
+    loop cn = do
+      isAllocated cn >>= \case
+        False -> pure cn
+        True -> loop (cn + 1)
+
+isAllocated :: CN -> M Bool
+isAllocated cn = do
+  assert (cn /= 0) $ do
+  assert (cn /= 0xffff) $ do
+  (si,so) <- cn2sio cn
+  cn' <- CN <$> get16 si so
+  pure (cn' /= 0)
 
 -- This is the core computation...
 siFromClusterNumber :: CN -> M SectorIndex
