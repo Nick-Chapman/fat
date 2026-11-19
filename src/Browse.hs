@@ -3,7 +3,7 @@ module Browse (dump,interact) where
 import CachedDisk (M,exec)
 import Control.Monad.IO.Class (liftIO)
 import DateTime (Date,Time)
-import Fat16 (Entry(..),Item(..),File(..),Dir(..),lookupItem,getDirEntries,getFileContents,echoRedirect,appendRedirect,mkDir,touch,removeDirEntry)
+import Fat16 (Entry(..),Item(..),File(..),Dir(..),lookupItem,getDirEntries,getFileContents,echoRedirect,appendRedirect,mkDir,removeDirEntry,touchFile)
 import FileTree (Tree(..),TreeEntry(..),printTree)
 import Prelude hiding (interact)
 import System.Console.ANSI qualified as AN
@@ -11,6 +11,7 @@ import System.Console.Haskeline qualified as HL
 import System.IO (hFlush,hPutStrLn)
 import System.IO qualified as IO (stderr)
 import Text.Printf (printf)
+import Control.Monad (when)
 
 dump :: FilePath -> IO ()
 dump path = exec path $ do
@@ -64,7 +65,7 @@ interact showPrompt dt path = do
 
 data Com
   = Null
-  | Ls
+  | Ls_la (Maybe Name)
   | Cat Name
   | Cd Name
   | EchoRedirect String Name
@@ -83,7 +84,8 @@ parseCom s =
     [] -> Command Null
     ('#':_):_ -> Command Null
     ["exit"] -> ExitCommand
-    ["ls"] -> Command Ls
+    ["ls","-la"] -> Command (Ls_la Nothing)
+    ["ls","-la",name] -> Command (Ls_la (Just name))
     ["cd",name] -> Command (Cd name)
     ["cat",name] -> Command (Cat name)
     ["echo","-n","''",">",name] -> Command (Touch name)
@@ -109,89 +111,149 @@ execCom :: (Date,Time) -> State -> Com -> M State
 execCom dt state@State{cwd} = \case
   Null -> do
     pure state
-  Ls -> do
-    lsDirAction cwd
+  Ls_la Nothing -> do
+    lsDirAction (const True) cwd
     pure state
-  Cat name -> do
-    lookupItem cwd name >>= \case
-      Nothing -> do
-        errM (printf "cat: %s: No such file or directory" name)
-      Just (IDir{}) -> do
-        errM (printf "cat: %s: Is a directory" name)
-      Just (IFile file) -> do
-        getFileContents file >>= liftIO . putStr
+  Ls_la (Just path) -> do
+    resolvePath cwd path >>= \case
+      Left e -> errM e
+      Right (dir,base) -> do
+        lookupItem dir base >>= \case
+          Nothing -> do
+            errM (printf "ls: cannot access '%s': No such file or directory" path)
+          Just (IFile{}) -> do
+            lsDirAction (==base) dir
+          Just (IDir dir') -> do
+            lsDirAction (const True) dir'
     pure state
-  Cd name -> do
-    lookupItem cwd name >>= \case
-      Nothing -> do
-        errM (printf "cd: %s: No such file or directory" name )
-        pure state
-      Just (IFile{}) -> do
-        errM (printf "cd: %s: Not a directory" name)
-        pure state
-      Just (IDir dir) -> do
-        pure state { cwd = dir }
-  EchoRedirect contents name -> do
-    let makeFile = echoRedirect dt contents name cwd
-    lookupItem cwd name >>= \case
-      Just IDir{} -> do
-        errM (printf "%s: is a directory" name)
-      Just IFile{} -> do
-        removeDirEntry True name cwd
-        makeFile
-      Nothing -> makeFile
+  Cat path -> do
+    resolvePath cwd path >>= \case
+      Left e -> errM e
+      Right (dir,base) -> do
+        lookupItem dir base >>= \case
+          Nothing -> do
+            errM (printf "cat: %s: No such file or directory" path)
+          Just (IDir{}) -> do
+            errM (printf "cat: %s: Is a directory" path)
+          Just (IFile file) -> do
+            getFileContents file >>= liftIO . putStr
     pure state
-  AppendRedirect contents name -> do
-    let appendFile = appendRedirect dt contents name cwd
-    lookupItem cwd name >>= \case
-      Just IDir{} -> do
-        errM (printf "%s: is a directory" name)
-      Just IFile{} -> do
-        appendFile
-      Nothing ->
-        appendFile
+  Cd path -> do
+    resolvePath cwd path >>= \case
+      Left e -> do errM e; pure state
+      Right (dir,base) -> do
+        lookupItem dir base >>= \case
+          Nothing -> do
+            errM (printf "cd: %s: No such file or directory" path )
+            pure state
+          Just (IFile{}) -> do
+            errM (printf "cd: %s: Not a directory" path)
+            pure state
+          Just (IDir dir) -> do
+            pure state { cwd = dir }
+  EchoRedirect contents path -> do
+    resolvePath cwd path >>= \case
+      Left e -> errM e
+      Right (dir,base) -> do
+        let makeFile = echoRedirect dt contents base dir
+        lookupItem dir base >>= \case
+          Just IDir{} -> do
+            errM (printf "%s: is a directory" path)
+          Just IFile{} -> do
+            removeDirEntry True base dir
+            makeFile
+          Nothing -> makeFile
     pure state
-  Touch name -> do
-    touch dt name cwd
+  AppendRedirect contents path -> do
+    resolvePath cwd path >>= \case
+      Left e -> errM e
+      Right (dir,base) -> do
+        let appendFile = appendRedirect dt contents base dir
+        lookupItem dir base >>= \case
+          Just IDir{} -> do
+            errM (printf "%s: is a directory" path)
+          Just IFile{} -> do
+            appendFile
+          Nothing ->
+            appendFile
     pure state
-  CopyIn path name -> do
-    contents <- liftIO $ readFile path
-    echoRedirect dt contents name cwd
+  Touch path -> do
+    resolvePath cwd path >>= \case
+      Left e -> errM e
+      Right (dir,base) -> do
+        lookupItem dir base >>= \case
+          Just{} -> do
+            pure () -- TODO: touch meta data
+          Nothing ->
+            touchFile dt base dir
     pure state
-  Mkdir name -> do
-    lookupItem cwd name >>= \case
-      Just{} -> do
-        errM (printf "mkdir: cannot create directory '%s': File exists" name)
-      Nothing -> do
-        mkDir dt name cwd
+  CopyIn xpath path -> do
+    contents <- liftIO $ readFile xpath
+    resolvePath cwd path >>= \case
+      Left e -> errM e
+      Right (dir,base) -> do
+        echoRedirect dt contents base dir
     pure state
-  Rm name -> do
-    lookupItem cwd name >>= \case
-      Nothing -> do
-        errM (printf "rm: cannot remove '%s': No such file or directory" name)
-      Just IDir{} -> do
-        errM (printf "rm: cannot remove '%s': Is a directory" name)
-      Just IFile{} -> do
-        removeDirEntry True name cwd
+  Mkdir path -> do
+    resolvePath cwd path >>= \case
+      Left e -> errM e
+      Right (dir,base) -> do
+        lookupItem dir base >>= \case
+          Just{} -> do
+            errM (printf "mkdir: cannot create directory '%s': File exists" path)
+          Nothing -> do
+            mkDir dt base dir
     pure state
-  Rmdir name -> do
-    lookupItem cwd name >>= \case
-      Nothing -> do
-        errM (printf "rmdir: failed to remove '%s': No such file or directory" name)
-      Just IFile{} -> do
-        errM (printf "rmdir: failed to remove '%s': Not a directory" name)
-      Just IDir{} -> do
-        removeDirEntry False name cwd
+  Rm path -> do
+    resolvePath cwd path >>= \case
+      Left e -> errM e
+      Right (dir,base) -> do
+        lookupItem dir base >>= \case
+          Nothing -> do
+            errM (printf "rm: cannot remove '%s': No such file or directory" path)
+          Just IDir{} -> do
+            errM (printf "rm: cannot remove '%s': Is a directory" path)
+          Just IFile{} -> do
+            removeDirEntry True base dir
+    pure state
+  Rmdir path -> do
+    resolvePath cwd path >>= \case
+      Left e -> errM e
+      Right (dir,base) -> do
+        lookupItem dir base >>= \case
+          Nothing -> do
+            errM (printf "rmdir: failed to remove '%s': No such file or directory" path)
+          Just IFile{} -> do
+            errM (printf "rmdir: failed to remove '%s': Not a directory" path)
+          Just (IDir dir') -> do
+            n <- length <$> getDirEntries dir'
+            if (n == 2) -- "." and ".."
+              then removeDirEntry False base dir
+              else errM (printf "rmdir: failed to remove '%s': Directory not empty" path)
     pure state
 
-lsDirAction :: Dir -> M ()
-lsDirAction dir = do
+resolvePath :: Dir -> String -> M (Either String (Dir,String))
+resolvePath cwd path0 = loop cwd path0
+  where
+    loop dir path = do
+      let (front,back) = break (=='/') path
+      case back of
+        [] -> pure (Right (dir,front))
+        _slash:path' -> do
+          lookupItem dir front >>= \case
+            Nothing -> pure (Left (printf "%s: No such file or directory" path0))
+            Just IFile{} -> pure (Left (printf "%s: Not a directory" path0))
+            Just (IDir dir) -> loop dir path'
+
+lsDirAction :: (String -> Bool) -> Dir -> M ()
+lsDirAction pred dir = do
   let
     showEntry :: Entry -> IO ()
-    showEntry Entry{longName,item} = case item of
-      IDir{} -> printf "- %6i  %s/\n" (0::Int) longName -- TODO: dir size
-      IFile (File {fileSize}) ->
-        printf "- %6i  %s\n" (fromIntegral fileSize :: Int) longName
+    showEntry Entry{longName,item} = do
+      when (pred longName) $ case item of
+        IDir{} -> printf "- %6i  %s/\n" (0::Int) longName -- TODO: dir size
+        IFile (File {fileSize}) ->
+          printf "- %6i  %s\n" (fromIntegral fileSize :: Int) longName
 
   es <- getDirEntries dir
   mapM_ (liftIO . showEntry) es

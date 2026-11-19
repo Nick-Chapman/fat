@@ -1,0 +1,11 @@
+touch birth
+
+mkdir sub
+mkdir sub/deep
+echo xxx > sub/deep/file1
+echo yyy >> sub/deep/file1
+
+cp /home/nic/code/fat/README.md sub/rrr
+
+rm sub/deep/file1
+rmdir sub/deep

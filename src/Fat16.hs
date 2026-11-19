@@ -10,7 +10,7 @@ module Fat16
   , echoRedirect
   , appendRedirect
   , mkDir
-  , touch
+  , touchFile
   , removeDirEntry
   ) where
 
@@ -75,8 +75,9 @@ entryOfGroup = \case
           | otherwise                  -> longNameOfLongSlots longs
     pure $ Just $ Entry { longName, item }
 
-touch :: (Date,Time) -> String -> Dir -> M ()
-touch dt longName dir = do
+touchFile :: (Date,Time) -> String -> Dir -> M ()
+touchFile dt longName dir = do
+  -- creates directory entry; but allocates no clusters for the file
   let entry = makeStandardEntry dt 0 (makeShort longName) (FileOfSize 0)
   writeDirEntry longName entry dir
 
