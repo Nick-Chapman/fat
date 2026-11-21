@@ -3,13 +3,13 @@ module Volume
   ( bytesPerDirEntry
   , Vol(..)
   , getVolumeInfo
-  , CN(..),
+  , CN, makeCN,cn2w16
   )
 where
 
 import Control.Exception (assert)
 import Disk (M,sectorSize,newSector,loadIntoSector,readInSector)
-import Types (SectorIndex,CN(..),Vol(..),W8,W16,SectorOffset,HL(..),mk16)
+import Types (SectorIndex,CN,makeCN,cn2w16,Vol(..),W8,W16,SectorOffset,HL(..),mk16)
 
 bytesPerDirEntry :: Int
 bytesPerDirEntry = 32

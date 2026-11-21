@@ -27,7 +27,7 @@ import DateTime (Date,Time,dateWord,timeWord,fineTimeByte)
 import GetSet (get8,get16,get32,set8,set16,set32,getBytes)
 import Prelude hiding (interact)
 import Types (W8,W16,W32,SectorIndex,SectorOffset,toChar,bytes16,bytes32,bytesString)
-import Volume (bytesPerDirEntry,Vol(..),CN(..))
+import Volume (bytesPerDirEntry,Vol(..),CN, makeCN,cn2w16)
 
 data Entry = Entry { longName :: String, item :: Item } deriving (Eq,Show)
 data Item = IDir Dir | IFile File deriving (Eq,Show)
@@ -78,13 +78,13 @@ entryOfGroup = \case
 touchFile :: (Date,Time) -> String -> Dir -> M ()
 touchFile dt longName dir = do
   -- creates directory entry; but allocates no clusters for the file
-  let entry = makeStandardEntry dt 0 (makeShort longName) (FileOfSize 0)
+  let entry = makeStandardEntry dt (makeCN 0) (makeShort longName) (FileOfSize 0)
   writeDirEntry longName entry dir
 
 echoRedirect :: (Date,Time) -> String -> String -> Dir -> M ()
 echoRedirect dt contents longName dir = do
   let fileSize = fromIntegral (length contents)
-  let entry = makeStandardEntry dt 0 (makeShort longName) (FileOfSize fileSize)
+  let entry = makeStandardEntry dt (makeCN 0) (makeShort longName) (FileOfSize fileSize)
   -- to get byte match: allocteCluster; writeDirEntry
   writeDirEntry longName entry dir
   cn <- allocteCluster
@@ -120,7 +120,7 @@ emptyDirBytes dt cn parent =
 
 dir2cn :: Dir -> CN
 dir2cn = \case
-  Root -> 0
+  Root -> makeCN 0 -- TODO: hmm?
   Sub cn -> cn
 
 setStartingCluster :: String -> CN -> Dir -> M ()
@@ -129,7 +129,7 @@ setStartingCluster sought cn dir =
     Nothing -> undefined "impossible, I just added it"
     Just (ActiveGroup _ short) -> do
       let (si,so) = shortAddr short
-      set16 si (so + 0x1A) (fromIntegral cn) -- Ox1A is offset of start-cluster in normal entry
+      set16 si (so + 0x1A) (cn2w16 cn) -- Ox1A is offset of start-cluster in normal entry
 
 ----------------------------------------------------------------------
 -- RM
@@ -149,7 +149,7 @@ removeDirEntry zeroingContents longName dir = do
       clearFatChain cn
 
 startingClusterFromAddr :: Addr -> M CN
-startingClusterFromAddr (si,so) = fromIntegral <$> get16 si (so + 0x1A)
+startingClusterFromAddr (si,so) = makeCN <$> get16 si (so + 0x1A)
 
 markEntryAddrUnused :: Addr -> M ()
 markEntryAddrUnused (si,so) = set8 si so 0xe5
@@ -172,7 +172,7 @@ writeBytesInClusterChain cn = loop cn
         let (front,rest) = splitAt sectorSize bytes
         writeSectorBytes si 0 front
         cn' <- allocteCluster
-        setNextCluser cn (fromIntegral cn')
+        setNextCluser cn (cn2w16 cn')
         loop cn' rest
 
 writeSectorBytes :: SectorIndex -> SectorOffset -> [W8] -> M ()
@@ -313,7 +313,7 @@ encodeStandardEntry e = do
     ++ [0,0] -- high 16bits of cluster number; always 0 for FAT-16
     ++ bytes16 (timeWord mtime)
     ++ bytes16 (dateWord mdate)
-    ++ bytes16 (fromIntegral startingCluster)
+    ++ bytes16 (cn2w16 startingCluster)
     ++ bytes32 fileSize
 
 trunOrPadSpace :: Int -> String -> String
@@ -530,10 +530,10 @@ itemAtShortSlot ShortSlot{addr} = itemAtAddr addr
 itemAtAddr :: Addr -> M Item
 itemAtAddr addr@(si,so) = do
   attr <- get8 si (so+0xB)
-  firstCluster <- CN <$> get16 si (so + 0x1A)
+  firstCluster <- makeCN <$> get16 si (so + 0x1A)
   let isDir = (attr .&. 0x10) /= 0
   if | isDir -> do
-         pure $ IDir (if firstCluster == 0 then Root
+         pure $ IDir (if firstCluster == makeCN 0 then Root
                       else Sub { firstCluster })
      | otherwise -> do
          fileSize <- fileSizeAtAddr addr
@@ -558,14 +558,14 @@ nextCluster cn = do
     Link_NextCluster cn' -> pure cn'
     Link_EndOfChain -> do
       cn' <- allocteCluster
-      setNextCluser cn (fromIntegral cn')
+      setNextCluser cn (cn2w16 cn')
       pure cn'
 
 getNextCandidateCN :: M CN
 getNextCandidateCN = do
   lastAllocatedCN <- getLastAllocatedCN
   cn <- liftIO $ readIORef lastAllocatedCN
-  pure (cn + 1)
+  pure (makeCN (cn2w16 cn + 1)) -- TODO messy
 
 setLastAllocatedCN :: CN -> M ()
 setLastAllocatedCN cn = do
@@ -578,11 +578,11 @@ clearFatChain = loop
     loop :: CN -> M ()
     loop cn = do
       (si,so) <- cn2sio cn
-      cn' <- CN <$> get16 si so
+      cn' <- makeCN <$> get16 si so
       set16 si so 0
       VolumeInfo{sectorsPerFat} <- volume
       set16 (si + fromIntegral sectorsPerFat) so 0 -- backup FAT
-      if cn' == 0xffff then pure () else loop cn'
+      if cn' == makeCN 0xffff then pure () else loop cn'
 
 zeroBytesInClusterChain :: CN -> M ()
 zeroBytesInClusterChain cn = loop cn
@@ -600,13 +600,13 @@ data Link = Link_NextCluster CN | Link_EndOfChain
 
 stepFatChainL :: CN -> M Link
 stepFatChainL cn = do
-  assert (cn /= 0) $ do
-  assert (cn /= 0xffff) $ do
+  assert (cn /= makeCN 0) $ do
+  assert (cn /= makeCN 0xffff) $ do
   (si,so) <- cn2sio cn
-  cn' <- CN <$> get16 si so
+  cn' <- makeCN <$> get16 si so
   if
-    | cn' == 0 -> error "stepFatChainL/Unallocated"
-    | cn' == 0xffff -> pure Link_EndOfChain
+    | cn' == makeCN 0 -> error "stepFatChainL/Unallocated"
+    | cn' == makeCN 0xffff -> pure Link_EndOfChain
     | otherwise -> pure (Link_NextCluster cn')
 
 allocteCluster :: M CN
@@ -623,21 +623,21 @@ findFreeCluster = getNextCandidateCN >>= loop
     loop cn = do
       isAllocated cn >>= \case
         False -> pure cn
-        True -> loop (cn + 1)
+        True -> loop (makeCN (cn2w16 cn + 1))
 
 isAllocated :: CN -> M Bool
 isAllocated cn = do
-  assert (cn /= 0) $ do
-  assert (cn /= 0xffff) $ do
+  assert (cn /= makeCN 0) $ do
+  assert (cn /= makeCN 0xffff) $ do
   (si,so) <- cn2sio cn
-  cn' <- CN <$> get16 si so
-  pure (cn' /= 0)
+  cn' <- makeCN <$> get16 si so
+  pure (cn' /= makeCN 0)
 
 -- This is the core computation...
 siFromClusterNumber :: CN -> M SectorIndex
 siFromClusterNumber cn = do
   VolumeInfo{sectorsPerCluster,clusterBegin} <- volume
-  pure $ clusterBegin + (fromIntegral cn - 2) * fromIntegral sectorsPerCluster
+  pure $ clusterBegin + (fromIntegral (cn2w16 cn) - 2) * fromIntegral sectorsPerCluster
 
 setNextCluser :: CN -> W16 -> M ()
 setNextCluser cn w16 = do
@@ -653,7 +653,7 @@ cn2sio :: CN -> M Addr
 cn2sio cn = do
   VolumeInfo{fatBegin} <- volume
   let bytePerChainWord :: Int = 2
-  let n = bytePerChainWord * fromIntegral cn
+  let n = bytePerChainWord * fromIntegral (cn2w16 cn)
   let si = fromIntegral (n `div` sectorSize) + fatBegin
   let so = fromIntegral (n `mod` sectorSize)
   --see ("cn2sio",cn,"->",si,so)

@@ -13,7 +13,7 @@ import Control.Monad.IO.Class (MonadIO,liftIO)
 import Data.IORef (IORef,newIORef)
 import Disk (Sector,sectorSize)
 import Disk qualified
-import Types (SectorIndex,SectorOffset,W8,CN(..))
+import Types (SectorIndex,SectorOffset,W8,CN,makeCN)
 import Volume (Vol(..),getVolumeInfo)
 
 instance Functor M where fmap = liftM
@@ -66,7 +66,7 @@ exec :: forall a. FilePath -> M a -> IO a
 exec path m0 = Disk.exec path do
   vol <- getVolumeInfo 0
   --liftIO $ print vol
-  lastAllocatedCN <- liftIO $ newIORef (CN 2)
+  lastAllocatedCN <- liftIO $ newIORef (makeCN 2)
 
   let VolumeInfo{fat2Begin,rootDirBegin} = vol
   let

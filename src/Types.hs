@@ -6,7 +6,7 @@ module Types
   , SectorOffset(..)
   , bytes16, bytes32, bytesString
   , Vol(..)
-  , CN(..)
+  , CN, makeCN, cn2w16
   ) where
 
 import Data.Bits (Bits)
@@ -63,7 +63,15 @@ bytesString :: String -> [W8]
 bytesString str = [ fi (c2w c) | c <- str ]
 
 -- Cluster Number
-newtype CN = CN W16 deriving (Num,Integral,Real,Enum,Ord,Eq,Show)
+newtype CN = CN W16 -- TODO: why here? could it be in Volume?
+  --deriving (Num,Integral,Real,Enum,Ord,Eq,Show)
+  deriving (Eq,Show)
+
+makeCN :: W16 -> CN
+makeCN = CN
+
+cn2w16 :: CN -> W16
+cn2w16 (CN w) = w
 
 data Vol = VolumeInfo
   { sectorsPerCluster :: W8
